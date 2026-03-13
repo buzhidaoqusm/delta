@@ -77,6 +77,8 @@ https://github.com/user-attachments/assets/bde3a976-603c-4fb8-afea-cb32681cb6f3
 
 **Data Visualization**
 - **Historical Trend Graphs:** Implement a third UI card dedicated to plotting the historical size changes of a specifically selected file or directory across all available snapshots over time.
+- **Largest Files Table:** Implement a table showing largest files.
+- **TreeMap** Implement a tree map similar to how classic disk space analyzers have with the file tree changing with the tree map.
 
 **Specific Path Scans**
 - **Specific Paths:** Allow users to scan and save specific paths as snapshots and compare later. Currently that feature is disabled.
