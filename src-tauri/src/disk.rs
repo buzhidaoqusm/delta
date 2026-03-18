@@ -209,6 +209,9 @@ pub fn naive_scan(target: &str, app: AppHandle) -> Result<model::Dir, AppError> 
                             }
                         }
 
+                        // Note
+                        // files and subdirs are not recursively counted here. It is local to that specific directory.
+                        // Size However is accumulated recursively
                         new_dir_node.meta.num_files = new_dir_node.files.len() as u64; // usize to u64
                         new_dir_node.meta.num_subdir = new_dir_node.subdirs.len() as u64;
                         new_dir_node.meta.size = current_dir_size; // accumulated length should be here

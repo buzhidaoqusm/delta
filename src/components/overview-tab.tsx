@@ -66,7 +66,7 @@ export default function Overview() {
             </div>
 
             {/* Size row */}
-            <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))' }}>
+            <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(3, minmax(120px, 1fr))' }}>
                 <div className="p-3 rounded-lg border bg-card text-card-foreground shadow-sm">
                     <span className="text-xs text-muted-foreground flex items-center gap-1.5 uppercase font-bold">
                         <HardDrive className="h-3 w-3" /> Size
