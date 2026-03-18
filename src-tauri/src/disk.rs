@@ -78,6 +78,7 @@ pub async fn disk_scan(
 }
 
 #[tauri::command]
+// maybe make this async?
 pub fn query_new_dir_object(
     path_list: Vec<String>,
     state: tauri::State<BackendState>,
@@ -121,8 +122,6 @@ pub fn naive_scan(target: &str, app: AppHandle) -> Result<model::Dir, AppError> 
         .contents_first(true)
         .same_file_system(true)
         .follow_links(false);
-
-
 
     let mut test_entry_progress_counter: u64 = 0;
 
