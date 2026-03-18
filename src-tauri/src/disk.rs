@@ -11,7 +11,7 @@ use walkdir::WalkDir;
 use crate::error::AppError;
 use crate::model::{self, BackendState, InitDisk};
 
-fn hash_path_id(path: &str) -> u64 {
+pub fn hash_path_id(path: &str) -> u64 {
     let seed = 420;
     let hash = XxHash64::oneshot(seed, path.as_bytes()); // need as bytes since &str is same bytes but typing says it is bytes that are text
     hash
