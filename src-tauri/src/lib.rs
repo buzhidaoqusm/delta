@@ -68,6 +68,7 @@ pub fn run() {
             database::write_current_tree,
             database::get_local_snapshot_files,
             database::delete_snapshot_file,
+            database::get_path_historical_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

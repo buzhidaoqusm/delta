@@ -27,10 +27,41 @@ interface FrontEndSnapshotStore {
   setPreviousSnapshots: (snapshotFileList: SnapshotFile[]) => void; // need spread to force rerender
 }
 
+
 interface ErrorStore {
   currentBackendErrors: BackendError[];
   setCurrentBackendError: (newError: BackendError) => void; // send current backend error based on a new 
 }
+
+interface DirEntryHistoryStore {
+  currentDirEntryHistory: { timestamp: number; sizeBytes: number }[];
+  queryDirEntryHistory: (rootPath: string, absolutePath: string) => void;
+  setCurrentDirEntryHistory: (newHistory: { timestamp: number; sizeBytes: number }[]) => void; // can also uyse this as reset
+}
+
+export const useDirEntryHistoryStore = create<DirEntryHistoryStore>((set) => ({
+  currentDirEntryHistory: [],
+  queryDirEntryHistory: async (rootPath, absolutePath) => {
+    try {
+      const result: [string, number][] = await invoke(
+        'get_path_historical_data',
+        { rootPath, absolutePath }
+      );
+
+      const formattedHistory = result.map(([dateStr, sizeBytes]) => ({
+        timestamp: new Date(dateStr).getTime(),
+        sizeBytes,
+      }));
+
+      set({ currentDirEntryHistory: formattedHistory });
+    } catch (error) {
+      console.error(error);
+      useErrorStore.getState().setCurrentBackendError(error as BackendError);
+      set({ currentDirEntryHistory: [] });
+    }
+  },
+  setCurrentDirEntryHistory: (newHistory) => set({ currentDirEntryHistory: newHistory }),
+}));
 
 
 export const useErrorStore = create<ErrorStore>((set) => ({

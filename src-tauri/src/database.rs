@@ -317,8 +317,8 @@ pub fn delete_snapshot_file(
     Ok(true)
 }
 
-#[tauri::command]
 // list the date as YYYY-MM-DD using chrono Naive data again
+#[tauri::command]
 pub fn get_path_historical_data(
     root_path: String,
     absolute_path: String,
@@ -337,7 +337,7 @@ pub fn get_path_historical_data(
 
     for entry in fs::read_dir(&prev_data_db_path)? {
         let entry_result = entry?;
-        let path = entry_result.path();
+        let path = entry_result.path(); // abs path of each db file
         let file_path_name = path
             .file_stem()
             .ok_or(AppError::CustomError(
@@ -350,7 +350,7 @@ pub fn get_path_historical_data(
 
         if let [drive_name, date, size] = path_segmented.as_slice() {
             if *drive_name == cleaned_name {
-                if let Ok(temp_states) = query_stats_from_id_utility(id, &prev_data_db_path) {
+                if let Ok(temp_states) = query_stats_from_id_utility(id, &path) {
                     let parsed_date = NaiveDateTime::parse_from_str(date, "%Y%m%d%H%M")?;
                     data_vec.push((
                         // 2026-03-18 format

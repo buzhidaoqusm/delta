@@ -1,17 +1,16 @@
 import { Tree } from "react-arborist";
-import { userStore } from "./store";
+import { useDirEntryHistoryStore, userStore } from "./store";
 import useResizeObserver from "use-resize-observer";
 import { Folder, File, FolderOpen, ArrowRight } from "lucide-react";
 import { filesize } from "filesize";
 import { Badge } from "./ui/badge";
 import InfoFlagBar from "./info_flag_bar";
-import {formatBytes, pathSeparator} from "../lib/utils"
+import { formatBytes, pathSeparator } from "../lib/utils"
 import { Progress } from "./ui/progress";
 
 
 function parsePathToSegment(path: string | undefined): string[] {
   const checked = path ?? "";
-  // NEW
   const segments = checked.split(pathSeparator);
   return segments.slice(1).filter(s => s.length > 0);
 }
@@ -20,7 +19,7 @@ const INDENT_SIZE = 20;
 
 // Header and node column widths
 const COL_WIDTHS = {
-  size: "w-24",      
+  size: "w-24",
   prev: "w-24",
   change: "w-24",
   diff: "w-26",
@@ -30,7 +29,7 @@ const COL_WIDTHS = {
 const TreeHeader = () => (
   <div className="flex items-center h-8 text-xs font-mono font-bold text-gray-400 select-none min-w-[600px]">
     <div className="flex-1 pl-1">Name</div>
-    
+
     <div className={`${COL_WIDTHS.size} text-right px-2 border-l border-gray-300`}>Size</div>
     <div className={`${COL_WIDTHS.prev} text-right px-2 border-l border-gray-300`}>Prev</div>
     <div className={`${COL_WIDTHS.change} text-right px-2 border-l border-gray-300`}>Change</div>
@@ -43,6 +42,7 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
   const addNewDirView = userStore((state) => state.addNewDirView);
   const changeCurrentPath = userStore((state) => state.changeCurrentPath);
   const updateCurrentClickedOverview = userStore((state) => state.changeCurrentOverviewNode);
+  const updateCurrentDirEntryHistory = useDirEntryHistoryStore((state) => state.queryDirEntryHistory)
   const changeCurrentEntryDetails = userStore((state) => state.changeCurrentEntryDetails);
 
   // padding that react arborist injects is stripped but the rest of the stuff is not, padding self handle
@@ -65,7 +65,7 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
   let file_name_text_color = node.data.diff?.deleted_flag ? "text-red-500" : "text-grey-200";
 
   let row_bg_color = node.data.diff?.deleted_flag ? "bg-red-950/30" : "bg-transparent";
-  
+
   // Handle new, deleted, gray
   let status_field_color = "bg-transparent";
   if (node.data.diff) {
@@ -81,7 +81,7 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
   let change_field_value = "-";
   if (node.data.diff) {
     // Check if file is deleted if so workaround, else do the normal change calc (curr - prev)
-    let diff = node.data.diff.deleted_flag ? node.data.diff.prevsize - node.data.size : node.data.size - node.data.diff.prevsize; 
+    let diff = node.data.diff.deleted_flag ? node.data.diff.prevsize - node.data.size : node.data.size - node.data.diff.prevsize;
     if (diff < 0) {
       change_field_color = "text-green-400"
     } else if (diff > 0) { // current > prev
@@ -94,7 +94,7 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
   let ratioValue = 99;
   if (node.isRoot) {
     ratioValue = 99;
-  } else if(node.parent?.data.size) { // should be undef
+  } else if (node.parent?.data.size) { // should be undef
     ratioValue = (node.data.size / node.parent.data.size) * 100
   } else {
     ratioValue = 100;
@@ -111,6 +111,7 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
       `}
       onClick={() => {
         updateCurrentClickedOverview(node.data);
+        updateCurrentDirEntryHistory(userStore.getState().root.path, node.data.path)
         if (!node.isOpen && !node.isLeaf && (!node.data.children || node.data.children.length === 0)) {
           addNewDirView(node.data, parsePathToSegment(node.data.path));
         }
@@ -124,9 +125,9 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
         }
       }
     >
-      
-      <div 
-        style={{ width: `${node.level * INDENT_SIZE}px` }} 
+
+      <div
+        style={{ width: `${node.level * INDENT_SIZE}px` }}
         className="flex-shrink-0 relative h-full"
       >
         {/* {Array.from({ length: node.level }).map((_, i) => (
@@ -142,11 +143,11 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
       <div className={`flex flex-1 items-center border-b border-gray-600/50 min-w-0 ${row_bg_color}`}>
         <div className="flex-1 flex items-center min-w-0 pr-4">
           <div className="mr-2 flex-shrink-0 text-gray-400">
-             {node.isLeaf ? (
-               <File className="h-4 w-4 text-sky-400" />
-             ) : (
-               node.isOpen ? <FolderOpen className="h-4 w-4 text-amber-400" /> : <Folder className="h-4 w-4 text-amber-400" />
-             )}
+            {node.isLeaf ? (
+              <File className="h-4 w-4 text-sky-400" />
+            ) : (
+              node.isOpen ? <FolderOpen className="h-4 w-4 text-amber-400" /> : <Folder className="h-4 w-4 text-amber-400" />
+            )}
           </div>
           <span className={`truncate text-xs font-mono ${file_name_text_color}`}>
             {node.data.name}
@@ -162,7 +163,7 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
         </div>
 
         <div className={`${COL_WIDTHS.change} flex-shrink-0 text-right px-2 text-xs font-mono tabular-nums ${change_field_color}`}>
-           {change_field_value}
+          {change_field_value}
         </div>
 
         <div className={`${COL_WIDTHS.diff} flex-shrink-0 flex justify-center items-center px-2 gap-2`}>
@@ -177,7 +178,7 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
             />
            )} */}
 
-           <div className={`h-2 w-2 shrink-0 rounded-full border-gray-500 ${status_field_color}`} />
+          <div className={`h-2 w-2 shrink-0 rounded-full border-gray-500 ${status_field_color}`} />
 
         </div>
 
@@ -196,11 +197,11 @@ function TestFileTreeSecond() {
     <div ref={ref} className="h-full w-full overflow-hidden flex flex-col text-white">
       <div className="h-full w-full overflow-auto">
         <div className="min-w-[600px] h-full flex flex-col">
-          
+
           <TreeHeader />
-          <Tree 
-            data={[rootState]} 
-            children={SimpleNode} 
+          <Tree
+            data={[rootState]}
+            children={SimpleNode}
             width={width && width > 600 ? width : 600}
             height={height ? height - 32 : 300}
             rowHeight={20}
