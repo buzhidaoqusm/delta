@@ -55,7 +55,7 @@ interface FrontEndConfigurationStore {
 }
 
 export const useConfigurationStore = create<FrontEndConfigurationStore>((set) => ({
-  ShowHistory: true,
+  ShowHistory: false,
   setShowHistory: (flag) => {
     set({ ShowHistory: flag })
   }
