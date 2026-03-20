@@ -43,37 +43,49 @@ interface ErrorStore {
 
 interface DirEntryHistoryStore {
   currentDirEntryHistory: { timestamp: number; sizeBytes: number }[];
+  activeHistoryPath: string | null; // rc condition helper
   queryDirEntryHistory: (rootPath: string, absolutePath: string) => void;
-  setCurrentDirEntryHistory: (newHistory: { timestamp: number; sizeBytes: number }[]) => void; // can also uyse this as reset
+  setCurrentDirEntryHistory: (newHistory: { timestamp: number; sizeBytes: number }[]) => void;
 }
 
-export const useDirEntryHistoryStore = create<DirEntryHistoryStore>((set) => ({
+export const useDirEntryHistoryStore = create<DirEntryHistoryStore>((set, get) => ({
   currentDirEntryHistory: [],
-  historyCache: {},
+  activeHistoryPath: null,
 
   queryDirEntryHistory: async (rootPath, absolutePath) => {
 
+    set({ activeHistoryPath: absolutePath }); // mark curr as the current active, this line is sync with onClick call so order is ensured
+
     if (historyCache[absolutePath]) {
       set({ currentDirEntryHistory: historyCache[absolutePath] });
-    } else {
-      try {
-        const result: [string, number][] = await invoke(
-          'get_path_historical_data',
-          { rootPath, absolutePath }
-        );
+      return;
+    }
 
-        const formattedHistory = result.map(([dateStr, sizeBytes]) => ({
-          timestamp: new Date(dateStr).getTime(),
-          sizeBytes,
-        }));
+    try {
+      const result: [string, number][] = await invoke(
+        'get_path_historical_data',
+        { rootPath, absolutePath }
+      );
 
-        set({ currentDirEntryHistory: formattedHistory });
-        historyCache[absolutePath] = formattedHistory
-      } catch (error) {
-        console.error(error);
-        useErrorStore.getState().setCurrentBackendError(error as BackendError);
-        set({ currentDirEntryHistory: [] });
+      console.log(result)
+
+      // If many async calls to this func is scheduled in rt then no guarentee of the order
+      // so only let the correct name one change state using a fast helper to mark the activeHistoryPath
+      if (get().activeHistoryPath !== absolutePath) {
+        return;
       }
+
+      const formattedHistory = result.map(([dateStr, sizeBytes]) => ({
+        timestamp: new Date(dateStr).getTime(),
+        sizeBytes,
+      }));
+
+      set({ currentDirEntryHistory: formattedHistory });
+      historyCache[absolutePath] = formattedHistory;
+    } catch (error) {
+      // for error set curr to empty
+      useErrorStore.getState().setCurrentBackendError(error as BackendError);
+      set({ currentDirEntryHistory: [] });
     }
   },
 

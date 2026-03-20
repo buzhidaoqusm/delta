@@ -31,7 +31,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ setWhichField }) => {
               </Card>
               <Card className="flex-1 min-h-0 p-2 flex flex-col overflow-auto">
                 <SpaceHistoryChart></SpaceHistoryChart>
-                <Card className="flex-1 min-h-0 p-2 flex flex-col overflow-auto"></Card>
+                {/* <Card className="flex-1 min-h-0 p-2 flex flex-col overflow-auto"></Card> */}
                 {/* <NotificationCenter></NotificationCenter> */}
               </Card>
             </div>

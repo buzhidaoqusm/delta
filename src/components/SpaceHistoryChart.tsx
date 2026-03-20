@@ -46,7 +46,7 @@ export function SpaceHistoryChart() {
             ticks={ticks}
             tickFormatter={(t) => {
               const d = new Date(t);
-              return `${d.getMonth() + 1}/${d.getDate()}`;
+              return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
             }}
             tickLine={false}
             axisLine={false}
@@ -65,7 +65,8 @@ export function SpaceHistoryChart() {
               <ChartTooltipContent
                 labelFormatter={(_, payload) => {
                   if (!payload?.[0]?.payload?.timestamp) return "";
-                  return new Date(payload[0].payload.timestamp).toLocaleDateString();
+                  const d = new Date(payload[0].payload.timestamp);
+                  return d.toLocaleDateString(undefined, { timeZone: "UTC" });
                 }}
                 formatter={(value) => formatBytes(value)}
               />

@@ -317,7 +317,8 @@ pub fn delete_snapshot_file(
     Ok(true)
 }
 
-// list the date as YYYY-MM-DD using chrono Naive data again
+// TODO For this func since historical data is currently scaled only by day (design choice)
+// need to dedup same day scans by taking the highest one before it goes to fe
 #[tauri::command]
 pub fn get_path_historical_data(
     root_path: String,
