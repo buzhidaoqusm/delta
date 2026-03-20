@@ -4,6 +4,14 @@ import { BackendError, CurrentEntryDetails, DirView, DirViewChildren, TreeDataNo
 import { appendPaths } from "@/lib/utils";
 import { SnapshotFile } from "./data_table_columns";
 
+
+// caching ht for history graph making it a singleton for now
+let historyCache: Record<string, { timestamp: number; sizeBytes: number }[]> = {}
+// TODO cache clear helper
+export const clearHistoryCache = () => {
+  historyCache = {};
+};
+
 // To get the path we could traverse up the tree or we could store it as a field in the interface
 // the root is the global state, everything else is helper functions
 interface FrontEndFileSystemStore {
@@ -16,7 +24,7 @@ interface FrontEndFileSystemStore {
   addNewDirView: (currentTreeData: TreeDataNode, pathList: string[]) => void;
   changeCurrentOverviewNode: (currentTreeNode: TreeDataNode) => void;
   changeCurrentPath: (path: string) => void;
-  changeCurrentEntryDetails: (numsubdir: number, numsubfile: number) => void; // NEW can pass in more info if needed
+  changeCurrentEntryDetails: (numsubdir: number, numsubfile: number) => void;
   initDirData: (inital: DirView) => void;
   setSnapshotFlag: (flag: boolean) => void;
   setSelectedHistorySnapshotFile: (file: string) => void;
@@ -31,6 +39,79 @@ interface ErrorStore {
   currentBackendErrors: BackendError[];
   setCurrentBackendError: (newError: BackendError) => void; // send current backend error based on a new 
 }
+
+interface DirEntryHistoryStore {
+  currentDirEntryHistory: { timestamp: number; sizeBytes: number }[];
+  activeHistoryPath: string | null; // rc condition helper
+  queryDirEntryHistory: (rootPath: string, absolutePath: string) => void;
+  setCurrentDirEntryHistory: (newHistory: { timestamp: number; sizeBytes: number }[]) => void;
+}
+
+interface FrontEndConfigurationStore {
+  ShowHistory: boolean;
+  setShowHistory: (flag: boolean) => void;
+  // If ever need more configs add here
+  // saving configs to persistent config file in future also 
+}
+
+export const useConfigurationStore = create<FrontEndConfigurationStore>((set) => ({
+  ShowHistory: false,
+  setShowHistory: (flag) => {
+    set({ ShowHistory: flag })
+  }
+}))
+
+export const useDirEntryHistoryStore = create<DirEntryHistoryStore>((set, get) => ({
+  currentDirEntryHistory: [],
+  activeHistoryPath: null,
+
+  queryDirEntryHistory: async (rootPath, absolutePath) => {
+
+    // mark curr as the current active, this line is sync with onClick call so order is ensured
+    set({ activeHistoryPath: absolutePath });
+
+    // Check if history flag disabled
+    const showHistoryFlag = useConfigurationStore.getState().ShowHistory;
+
+    if (!showHistoryFlag) {
+      return;
+    }
+
+    if (historyCache[absolutePath]) {
+      set({ currentDirEntryHistory: historyCache[absolutePath] });
+      return;
+    }
+
+    try {
+      const result: [string, number][] = await invoke(
+        'get_path_historical_data',
+        { rootPath, absolutePath }
+      );
+
+      console.log(result)
+
+      // If many async calls to this func is scheduled in rt then no guarentee of the order
+      // so only let the correct name one change state using a fast helper to mark the activeHistoryPath
+      if (get().activeHistoryPath !== absolutePath) {
+        return;
+      }
+
+      const formattedHistory = result.map(([dateStr, sizeBytes]) => ({
+        timestamp: new Date(dateStr).getTime(),
+        sizeBytes,
+      }));
+
+      set({ currentDirEntryHistory: formattedHistory });
+      historyCache[absolutePath] = formattedHistory;
+    } catch (error) {
+      // for error set curr to empty
+      useErrorStore.getState().setCurrentBackendError(error as BackendError);
+      set({ currentDirEntryHistory: [] });
+    }
+  },
+
+  setCurrentDirEntryHistory: (newHistory) => set({ currentDirEntryHistory: newHistory }),
+}));
 
 
 export const useErrorStore = create<ErrorStore>((set) => ({

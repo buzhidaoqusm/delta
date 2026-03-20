@@ -3,20 +3,24 @@ use chrono::NaiveDateTime;
 use rusqlite::{params, Connection};
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 
+use crate::disk::hash_path_id;
 use crate::error::AppError;
 use crate::model::{self, BackendState, Node, SnapshotDbMeta};
 use crate::platform::clean_disk_name;
 
 pub struct SnapshotRecord {
     pub id: i64,
-    pub size: i64,
-    pub dir_flag: bool, // uneeded I think id should already tell if dir or file, but can use for redudancy as if same id somehow cahnged from file to folder etc
+    pub size: i64, // sqlite limitation but should be big enough
+    pub dir_flag: bool,
     pub sub_folder_count: i64,
     pub sub_file_count: i64,
 }
 
 // This for query stats for a specific ID
+// currently used when calling from a Dir object (Dir object .function get data)
+// Overall not needed can both use utility way but just keeping both separate
 pub fn query_stats_from_id(
     dir: &model::Dir,
     state: tauri::State<BackendState>,
@@ -60,6 +64,34 @@ pub fn query_stats_from_id(
     let final_stats = try_fetch().unwrap_or(default_record);
 
     Ok(final_stats)
+}
+
+// Used as utility for any given hashed ID and correct path to DB file
+// Will return row if there is, if there is not then throws error (no defaults)
+pub fn query_stats_from_id_utility(id: u64, db_path: &Path) -> Result<SnapshotRecord, AppError> {
+    let try_fetch = || -> Result<SnapshotRecord, rusqlite::Error> {
+        let conn = Connection::open(&db_path)?;
+
+        let stats = conn.query_row(
+            "SELECT * FROM snapshot WHERE id == ?1",
+            [id as i64], // this needs conv since id is u64 but sqllite cannot recog that
+            |row| {
+                Ok(SnapshotRecord {
+                    id: row.get(0)?,
+                    size: row.get(1)?,
+                    dir_flag: row.get(2)?,
+                    sub_folder_count: row.get(3)?,
+                    sub_file_count: row.get(4)?,
+                })
+            },
+        )?;
+
+        Ok(stats)
+    };
+
+    let stats = try_fetch()?;
+
+    Ok(stats)
 }
 
 // Needs a parameter for which db file to actually query from
@@ -283,4 +315,59 @@ pub fn delete_snapshot_file(
     // Using fs delete also catch the error for that if needed on the passed in path (such as if X does not exist)
 
     Ok(true)
+}
+
+// TODO For this func since historical data is currently scaled only by day (design choice)
+// need to dedup same day scans by taking the highest one before it goes to fe
+#[tauri::command]
+pub fn get_path_historical_data(
+    root_path: String,
+    absolute_path: String,
+    state: tauri::State<'_, BackendState>,
+) -> Result<Vec<(String, i64)>, AppError> {
+    let prev_data_db_path: std::path::PathBuf = state
+        .local_appdata_path
+        .as_ref()
+        .unwrap()
+        .join("tempsnapshot");
+
+    let cleaned_name = clean_disk_name(&root_path)?;
+    let id = hash_path_id(&absolute_path);
+
+    let mut data_vec: Vec<(String, i64)> = Vec::new();
+
+    for entry in fs::read_dir(&prev_data_db_path)? {
+        let entry_result = entry?;
+        let path = entry_result.path(); // abs path of each db file
+        let file_path_name = path
+            .file_stem()
+            .ok_or(AppError::CustomError(
+                "Path failed to get file stem".to_string(),
+            ))?
+            .to_string_lossy()
+            .to_string();
+
+        let path_segmented: Vec<&str> = file_path_name.split('_').collect();
+
+        if let [drive_name, date, size] = path_segmented.as_slice() {
+            if *drive_name == cleaned_name {
+                if let Ok(temp_states) = query_stats_from_id_utility(id, &path) {
+                    let parsed_date = NaiveDateTime::parse_from_str(date, "%Y%m%d%H%M")?;
+                    data_vec.push((
+                        // 2026-03-18 format
+                        parsed_date.format("%Y-%m-%d").to_string(),
+                        temp_states.size,
+                    ));
+                }
+            }
+        } else {
+            return Err(AppError::GeneralLogicalErr(
+                "Cannot parse malformed snapshot filename. Restart application".to_string(),
+            ));
+        }
+    }
+
+    data_vec.sort_by_key(|tuple| tuple.0.clone());
+
+    return Ok(data_vec);
 }

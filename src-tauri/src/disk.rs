@@ -11,7 +11,7 @@ use walkdir::WalkDir;
 use crate::error::AppError;
 use crate::model::{self, BackendState, InitDisk};
 
-fn hash_path_id(path: &str) -> u64 {
+pub fn hash_path_id(path: &str) -> u64 {
     let seed = 420;
     let hash = XxHash64::oneshot(seed, path.as_bytes()); // need as bytes since &str is same bytes but typing says it is bytes that are text
     hash
@@ -78,6 +78,7 @@ pub async fn disk_scan(
 }
 
 #[tauri::command]
+// maybe make this async?
 pub fn query_new_dir_object(
     path_list: Vec<String>,
     state: tauri::State<BackendState>,
@@ -121,8 +122,6 @@ pub fn naive_scan(target: &str, app: AppHandle) -> Result<model::Dir, AppError> 
         .contents_first(true)
         .same_file_system(true)
         .follow_links(false);
-
-
 
     let mut test_entry_progress_counter: u64 = 0;
 
