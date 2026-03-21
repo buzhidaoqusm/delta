@@ -54,6 +54,6 @@ pub fn clean_disk_name(disk_name: &str) -> Result<String, AppError> {
     if disk_name == "/" {
         Ok("root".to_string())
     } else {
-        Ok(disk_name.replace('/', ""))
+        Ok(disk_name.replace('/', "-"))
     }
 }
