@@ -1,10 +1,19 @@
 import React from 'react'
 import { Input } from './ui/input'
 
-const CustomPath = () => {
+interface CustomPathProps {
+  value: string;
+  onChange: (value: string) => void;
+}
+
+const CustomPath: React.FC<CustomPathProps> = ({ value, onChange }) => {
   return (
     <>
-    <Input disabled></Input>
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Enter custom path..."
+      />
     </>
   )
 }

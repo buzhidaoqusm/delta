@@ -46,19 +46,16 @@ pub fn retreive_disks() -> Result<Vec<InitDisk>, AppError> {
     Ok(disk_list)
 }
 
-// NOTE
-// https://v2.tauri.app/develop/calling-rust/#async-commands
-
-// NOTE
-// The tauri stae '_ is a lifetime param
-
+// FE currently sends in flags and for backend to do different actions but In the future
+// should refactor to make multiple diff BE function for diff task and frontend calls it then
+// this way more separation of concern
 #[tauri::command]
 pub async fn disk_scan(
     target: String,
     state: tauri::State<'_, BackendState>,
     app: AppHandle,
-    snapshot_file: String, // String, I think can bind the initial root scan input to this entry func or make a new func (decouple) for that
-    snapshot_flag: bool,   // temp? for the inital root (also thsi func) to compare or not compare
+    snapshot_file: String,
+    snapshot_flag: bool,
 ) -> Result<model::DirView, AppError> {
     let root = match naive_scan(&target, app) {
         Ok(root) => root,
@@ -67,7 +64,7 @@ pub async fn disk_scan(
 
     let root_view = match snapshot_flag {
         true => root.to_dir_view_unexpanded(state.clone(), snapshot_file)?,
-        false => root.to_dir_view_unexpanded_no_diff(), // unexpanded initally
+        false => root.to_dir_view_unexpanded_no_diff(),
     };
 
     // make the global state have the FS object
