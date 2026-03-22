@@ -31,34 +31,22 @@ const CustomPathCard: React.FC<SplashPageProps> = ({ setWhichField }) => {
     // Card only needs to read the currently selected snapshot file global store obj?
     const [selectedPath, setSelectedPath] = useState<string>("");
 
-    const [saveCurrentSnapshotFlag, setSaveCurrentSnapshotFlag] = useState<boolean>(true);
-
-    const snapshotFlag = userStore((state) => state.snapshotFlag) // this flag is for if to save snapshot or not
-
-    const setSnapshotFlag = userStore((state) => state.setSnapshotFlag)
-
     const snapshotFile = userStore((state) => state.prevSnapshotFilePath)
 
     const setCurrentBackendError = useErrorStore((state) => state.setCurrentBackendError)
 
     const runScan = async (target: string) => {
         try {
-            const result = await invoke<DirView>('disk_scan', { target, snapshotFile, snapshotFlag });
+            const result = await invoke<DirView>('disk_scan', { target, snapshotFile, snapshotFlag: false }); // always flag set to false
 
             const zustandInitFunc = userStore.getState().initDirData;
 
-            if (saveCurrentSnapshotFlag) {
-                const selectedDisk = target
-                const temp = await invoke('write_current_tree', { selectedDisk });
-            }
-
-            zustandInitFunc(result);
+            zustandInitFunc(result, target);
 
             setWhichField(false); // state switch to anallytics screen
 
         } catch (e) {
             setCurrentBackendError(e)
-            console.log(e)
         }
     }
 

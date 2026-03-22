@@ -25,7 +25,7 @@ interface FrontEndFileSystemStore {
   changeCurrentOverviewNode: (currentTreeNode: TreeDataNode) => void;
   changeCurrentPath: (path: string) => void;
   changeCurrentEntryDetails: (numsubdir: number, numsubfile: number) => void;
-  initDirData: (inital: DirView) => void;
+  initDirData: (inital: DirView, rootPath: string) => void;
   setSnapshotFlag: (flag: boolean) => void;
   setSelectedHistorySnapshotFile: (file: string) => void;
 }
@@ -252,10 +252,9 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
   changeCurrentOverviewNode: (currentTreeNode) =>
     set({ currentEntryData: currentTreeNode }),
 
-  initDirData: (initial) => {
+  initDirData: (initial, rootPath) => {
     // takes in initial dir view which is unexpanded X:\        
     // change the root based on the passed in stuff
-    console.log(initial)
 
     userStore.setState((state) => {
 
@@ -263,7 +262,8 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
         id: initial.id,
         name: initial.name,
         size: initial.meta.size,
-        path: initial.name,
+        // path: initial.name,
+        path: rootPath,
         numsubdir: initial.meta.num_subdir,
         numsubfiles: initial.meta.num_files,
         children: [],

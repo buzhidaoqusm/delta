@@ -1,5 +1,9 @@
 import React from 'react'
 import { Input } from './ui/input'
+import { Button } from './ui/button'
+import { FolderSearch } from 'lucide-react'
+import { open } from '@tauri-apps/plugin-dialog'
+import { useErrorStore } from './store'
 
 interface CustomPathProps {
   value: string;
@@ -7,14 +11,36 @@ interface CustomPathProps {
 }
 
 const CustomPath: React.FC<CustomPathProps> = ({ value, onChange }) => {
+
+  const setCurrentBackendError = useErrorStore((state) => state.setCurrentBackendError)
+
+  const handleOpenDialog = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+      });
+
+      if (selected && typeof selected === 'string') {
+        onChange(selected);
+      }
+    } catch (err) {
+      setCurrentBackendError(err)
+      console.error("Failed to open directory dialog", err);
+    }
+  }
+
   return (
-    <>
+    <div className="flex w-full items-center space-x-2">
       <Input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="Enter custom path..."
       />
-    </>
+      <Button variant="outline" size="icon" onClick={handleOpenDialog}>
+        <FolderSearch className="h-4 w-4" />
+      </Button>
+    </div>
   )
 }
 

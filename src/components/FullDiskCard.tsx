@@ -193,8 +193,6 @@ interface SplashPageProps {
 
 const FullDiskCard: React.FC<SplashPageProps> = ({ setWhichField }) => {
 
-    // Card only needs to read the currently selected snapshot file global store obj?
-
     const [disks, setDisks] = useState<InitDisk[]>([]);
 
     const [selectedDisk, setSelectedDisk] = useState<string>(""); // for full disk paths
@@ -240,7 +238,7 @@ const FullDiskCard: React.FC<SplashPageProps> = ({ setWhichField }) => {
                 const temp = await invoke('write_current_tree', { selectedDisk });
             }
 
-            zustandInitFunc(result);
+            zustandInitFunc(result, target);
 
             setWhichField(false); // state switch to anallytics screen
 
