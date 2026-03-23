@@ -51,9 +51,9 @@ export default function Overview() {
     return (
         <div className="w-full h-full flex flex-col p-2 gap-3 overflow-y-auto">
 
-            <div className="flex flex-col items-center text-center justify-center p-1">
-                <div className="flex flex-row items-center gap-2 text-center">
-                    <h2 className="font-bold text-base tracking-tight">
+            <div className="flex flex-col items-center text-center justify-center p-1 w-full">
+                <div className="flex flex-row items-center gap-2 text-center max-w-full">
+                    <h2 className="font-bold text-base tracking-tight break-all">
                         {currentNode.name}
                     </h2>
                 </div>
