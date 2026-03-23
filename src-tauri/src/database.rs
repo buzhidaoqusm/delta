@@ -369,6 +369,10 @@ pub fn delete_snapshot_file(
 //     return Ok(data_vec);
 // }
 
+
+// This approach in some cases might be wastefully slow worse than the old solution
+// at scale if user has 1000 then they wil need to wait about 1 second aroud to get the data back
+// in the future maybe can think of optimize
 #[tauri::command]
 pub fn get_path_historical_data(
     root_path: String,
