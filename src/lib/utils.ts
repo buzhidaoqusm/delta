@@ -10,11 +10,20 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export function parsePathToSegment(rootPath: string | undefined, fullPath: string | undefined): string[] {
+
+  const checkRootPath = rootPath ?? "";
+  const checked = fullPath ?? "";
+  const truncatedPath = checked.substring(checkRootPath.length) // Knowing the entry point root path you can determine the trailing paths details
+  const segments = truncatedPath.split(pathSeparator);
+  return segments.filter(s => s.length > 0);
+}
+
 export const formatDateTime = (dateStr: String) => {
   return new Date(dateStr.replace(' ', 'T')).toLocaleString('en-US', {
     dateStyle: 'long',
     timeStyle: 'short',
-  }); 
+  });
 }
 
 export const formatBytes = (bytes: any) => {
@@ -23,7 +32,7 @@ export const formatBytes = (bytes: any) => {
 }
 
 // Only really for on windows the root dir since root dir has the / appended to it
-export function appendPaths (prevPath: string, currentPath: string) {
+export function appendPaths(prevPath: string, currentPath: string) {
   if (!prevPath) {
     return currentPath;
   }
