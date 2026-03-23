@@ -28,7 +28,7 @@ export function SpaceHistoryChart() {
     if (!chartData || chartData.length === 0) {
       return (
         <div className="flex items-center justify-center h-full min-h-[200px] text-muted-foreground text-sm">
-          Select a directory to view history.
+          Select a directory or file to view history.
         </div>
       );
     }

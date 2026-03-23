@@ -4,7 +4,6 @@ import { BackendError, CurrentEntryDetails, DirView, DirViewChildren, TreeDataNo
 import { appendPaths } from "@/lib/utils";
 import { SnapshotFile } from "./data_table_columns";
 
-
 // caching ht for history graph making it a singleton for now
 let historyCache: Record<string, { timestamp: number; sizeBytes: number }[]> = {}
 // TODO cache clear helper
@@ -25,7 +24,7 @@ interface FrontEndFileSystemStore {
   changeCurrentOverviewNode: (currentTreeNode: TreeDataNode) => void;
   changeCurrentPath: (path: string) => void;
   changeCurrentEntryDetails: (numsubdir: number, numsubfile: number) => void;
-  initDirData: (inital: DirView) => void;
+  initDirData: (inital: DirView, rootPath: string) => void;
   setSnapshotFlag: (flag: boolean) => void;
   setSelectedHistorySnapshotFile: (file: string) => void;
 }
@@ -152,7 +151,7 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
 
   currentPath: "N/A",
 
-  snapshotFlag: false, // Compare with snapshots? default to do not compare snapshots
+  snapshotFlag: false, // default to do not compare snapshots
 
   prevSnapshotFilePath: "", // temp name for when there is nothing set and nothing chosen will be empty str
 
@@ -171,8 +170,6 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
         'query_new_dir_object',
         { pathList, snapshotFlag, prevSnapshotFilePath }
       );
-
-      console.log(result)
 
       userStore.setState((state) => {
 
@@ -195,7 +192,7 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
 
           modified: new Date(subdir.meta.modified.secs_since_epoch * 1000),
 
-          path: appendPaths(currentNode.path, subdir.name), // tauri might have a path append dynamically function
+          path: appendPaths(currentNode.path, subdir.name),
           children: [],
           directory: true,
         }));
@@ -252,10 +249,9 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
   changeCurrentOverviewNode: (currentTreeNode) =>
     set({ currentEntryData: currentTreeNode }),
 
-  initDirData: (initial) => {
+  initDirData: (initial, rootPath) => {
     // takes in initial dir view which is unexpanded X:\        
     // change the root based on the passed in stuff
-    console.log(initial)
 
     userStore.setState((state) => {
 
@@ -263,7 +259,8 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
         id: initial.id,
         name: initial.name,
         size: initial.meta.size,
-        path: initial.name,
+        // path: initial.name,
+        path: rootPath,
         numsubdir: initial.meta.num_subdir,
         numsubfiles: initial.meta.num_files,
         children: [],

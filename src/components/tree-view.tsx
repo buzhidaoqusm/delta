@@ -5,15 +5,8 @@ import { Folder, File, FolderOpen, ArrowRight } from "lucide-react";
 import { filesize } from "filesize";
 import { Badge } from "./ui/badge";
 import InfoFlagBar from "./info_flag_bar";
-import { formatBytes, pathSeparator } from "../lib/utils"
+import { formatBytes, parsePathToSegment, pathSeparator } from "../lib/utils"
 import { Progress } from "./ui/progress";
-
-
-function parsePathToSegment(path: string | undefined): string[] {
-  const checked = path ?? "";
-  const segments = checked.split(pathSeparator);
-  return segments.slice(1).filter(s => s.length > 0);
-}
 
 const INDENT_SIZE = 20;
 
@@ -38,12 +31,6 @@ const TreeHeader = () => (
 );
 
 const SimpleNode = ({ node, style, dragHandle }: any) => {
-
-  const addNewDirView = userStore((state) => state.addNewDirView);
-  const changeCurrentPath = userStore((state) => state.changeCurrentPath);
-  const updateCurrentClickedOverview = userStore((state) => state.changeCurrentOverviewNode);
-  const updateCurrentDirEntryHistory = useDirEntryHistoryStore((state) => state.queryDirEntryHistory)
-  const changeCurrentEntryDetails = userStore((state) => state.changeCurrentEntryDetails);
 
   // padding that react arborist injects is stripped but the rest of the stuff is not, padding self handle
   const { paddingLeft, ...restStyle } = style;
@@ -110,18 +97,20 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
         ${node.isSelected ? 'bg-gray-700' : ''}
       `}
       onClick={() => {
-        updateCurrentClickedOverview(node.data);
-        updateCurrentDirEntryHistory(userStore.getState().root.path, node.data.path)
+
+        const root = userStore.getState().root.path
+        userStore.getState().changeCurrentOverviewNode(node.data)
+        useDirEntryHistoryStore.getState().queryDirEntryHistory(root, node.data.path)
 
         if (!node.isOpen && !node.isLeaf && (!node.data.children || node.data.children.length === 0)) {
-          addNewDirView(node.data, parsePathToSegment(node.data.path));
+          userStore.getState().addNewDirView(node.data, parsePathToSegment(root, node.data.path));
         }
         node.toggle();
       }}
       onMouseEnter={
         () => {
-          changeCurrentPath(node.data.path)
-          changeCurrentEntryDetails(node.data.numsubdir, node.data.numsubfiles)
+          userStore.getState().changeCurrentPath(node.data.path)
+          userStore.getState().changeCurrentEntryDetails(node.data.numsubdir, node.data.numsubfiles)
         }
       }
     >
