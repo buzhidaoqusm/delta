@@ -32,12 +32,6 @@ const TreeHeader = () => (
 
 const SimpleNode = ({ node, style, dragHandle }: any) => {
 
-  const addNewDirView = userStore((state) => state.addNewDirView);
-  const changeCurrentPath = userStore((state) => state.changeCurrentPath);
-  const updateCurrentClickedOverview = userStore((state) => state.changeCurrentOverviewNode);
-  const updateCurrentDirEntryHistory = useDirEntryHistoryStore((state) => state.queryDirEntryHistory)
-  const changeCurrentEntryDetails = userStore((state) => state.changeCurrentEntryDetails);
-
   // padding that react arborist injects is stripped but the rest of the stuff is not, padding self handle
   const { paddingLeft, ...restStyle } = style;
 
