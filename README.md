@@ -52,11 +52,17 @@ https://github.com/user-attachments/assets/10722d41-1676-4030-86d9-0173415e87d5
     git clone https://github.com/chuunibian/delta.git
     cd delta
    ```
-3. Install deps and run:
+3. Install deps and run for app build:
    ```bash
     npm install
     npm run tauri build
    ```
+   or for dev build
+   ```bash
+    npm install
+    npm run tauri dev
+   ```
+   
 
 ## Tech stack
 
