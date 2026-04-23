@@ -56,6 +56,30 @@ export interface DirViewChildren {
   files: File[];
 }
 
+export interface LiveScanEntryEvent {
+  entry_type: "directory";
+  path: string;
+  parent_path?: string | null;
+  name: string;
+  id: string;
+  size: number;
+  num_files: number;
+  num_subdir: number;
+  created: { secs_since_epoch: number, nanos_since_epoch: number };
+  modified: { secs_since_epoch: number, nanos_since_epoch: number };
+}
+
+export interface LiveScanFileBatchUpdate {
+  parent_path: string;
+  size: number;
+  file_count: number;
+}
+
+export interface LiveScanFileBatchEvent {
+  updates: LiveScanFileBatchUpdate[];
+  entry_count: number;
+}
+
 export type AutoScanStatus =
   | "never_run"
   | "success_saved"

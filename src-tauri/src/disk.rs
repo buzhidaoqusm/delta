@@ -11,10 +11,85 @@ use walkdir::WalkDir;
 use crate::error::AppError;
 use crate::model::{self, BackendState, InitDisk};
 
+const LIVE_FILE_BATCH_SIZE: u64 = 500;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ScanEventMode {
+    Silent,
+    Live,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct LiveScanEntryEvent {
+    pub entry_type: String,
+    pub path: String,
+    pub parent_path: Option<String>,
+    pub name: String,
+    pub id: String,
+    pub size: u64,
+    pub num_files: u64,
+    pub num_subdir: u64,
+    pub created: SystemTime,
+    pub modified: SystemTime,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct LiveScanFileBatchUpdate {
+    pub parent_path: String,
+    pub size: u64,
+    pub file_count: u64,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct LiveScanFileBatchEvent {
+    pub updates: Vec<LiveScanFileBatchUpdate>,
+    pub entry_count: u64,
+}
+
 pub fn hash_path_id(path: &str) -> u64 {
     let seed = 420;
     let hash = XxHash64::oneshot(seed, path.as_bytes()); // need as bytes since &str is same bytes but typing says it is bytes that are text
     hash
+}
+
+fn path_to_string(path: &std::path::Path) -> String {
+    path.to_string_lossy().to_string()
+}
+
+fn emit_live_scan_entry(app: &AppHandle, event: LiveScanEntryEvent) -> Result<(), AppError> {
+    app.emit("live-scan-entry", event)?;
+    Ok(())
+}
+
+fn flush_live_file_batch(
+    app: &AppHandle,
+    pending_file_updates: &mut HashMap<String, (u64, u64)>,
+    pending_file_count: &mut u64,
+    force: bool,
+) -> Result<(), AppError> {
+    if *pending_file_count == 0 || (!force && *pending_file_count < LIVE_FILE_BATCH_SIZE) {
+        return Ok(());
+    }
+
+    let updates = pending_file_updates
+        .drain()
+        .map(|(parent_path, (size, file_count))| LiveScanFileBatchUpdate {
+            parent_path,
+            size,
+            file_count,
+        })
+        .collect();
+
+    app.emit(
+        "live-scan-file-batch",
+        LiveScanFileBatchEvent {
+            updates,
+            entry_count: *pending_file_count,
+        },
+    )?;
+
+    *pending_file_count = 0;
+    Ok(())
 }
 
 #[tauri::command]
@@ -57,7 +132,7 @@ pub async fn disk_scan(
     snapshot_file: String,
     snapshot_flag: bool,
 ) -> Result<model::DirView, AppError> {
-    let root = match naive_scan(&target, app) {
+    let root = match naive_scan_with_events(&target, app, ScanEventMode::Live) {
         Ok(root) => root,
         Err(e) => return Err(e),
     };
@@ -112,8 +187,18 @@ pub fn query_new_dir_object(
 }
 
 pub fn naive_scan(target: &str, app: AppHandle) -> Result<model::Dir, AppError> {
+    naive_scan_with_events(target, app, ScanEventMode::Silent)
+}
+
+pub fn naive_scan_with_events(
+    target: &str,
+    app: AppHandle,
+    event_mode: ScanEventMode,
+) -> Result<model::Dir, AppError> {
     let mut hash_store_dir: HashMap<PathBuf, model::Dir> = HashMap::new();
     let mut hash_store_file: HashMap<PathBuf, model::File> = HashMap::new();
+    let mut pending_file_updates: HashMap<String, (u64, u64)> = HashMap::new();
+    let mut pending_file_count: u64 = 0;
 
     let walker = WalkDir::new(target)
         .contents_first(true)
@@ -125,12 +210,15 @@ pub fn naive_scan(target: &str, app: AppHandle) -> Result<model::Dir, AppError> 
     for entry_result in walker {
         if let Ok(entry) = entry_result {
             test_entry_progress_counter += 1; // [TEMP]
-            if test_entry_progress_counter % 10000 == 0 {
+            if event_mode == ScanEventMode::Live && test_entry_progress_counter % 10000 == 0 {
                 app.emit("progress", test_entry_progress_counter)?;
             }
 
             if entry.file_type().is_file() {
                 if let Ok(file_meta) = entry.metadata() {
+                    let entry_path = entry.path().to_path_buf();
+                    let entry_parent_path = entry_path.parent().map(path_to_string);
+
                     // Create a file node with its details and push to the hashmap for it
                     let new_file_node = model::File {
                         meta: model::FileMeta {
@@ -148,13 +236,32 @@ pub fn naive_scan(target: &str, app: AppHandle) -> Result<model::Dir, AppError> 
                         },
                     };
 
-                    hash_store_file.insert(entry.path().to_path_buf(), new_file_node);
+                    if event_mode == ScanEventMode::Live {
+                        if let Some(parent_path) = entry_parent_path {
+                            let update = pending_file_updates.entry(parent_path).or_insert((0, 0));
+                            update.0 += new_file_node.meta.size;
+                            update.1 += 1;
+                            pending_file_count += 1;
+
+                            flush_live_file_batch(
+                                &app,
+                                &mut pending_file_updates,
+                                &mut pending_file_count,
+                                false,
+                            )?;
+                        }
+                    }
+
+                    hash_store_file.insert(entry_path, new_file_node);
                 }
             } else if entry.file_type().is_dir() {
                 if let Ok(directory_meta) = entry.metadata() {
+                    let entry_path = entry.path().to_path_buf();
+                    let entry_path_string = path_to_string(&entry_path);
+                    let entry_parent_path = entry_path.parent().map(path_to_string);
                     let mut current_dir_size: u64 = 0;
 
-                    if let Ok(temp_fs_read_dir) = fs::read_dir(entry.path().to_path_buf()) {
+                    if let Ok(temp_fs_read_dir) = fs::read_dir(entry_path.clone()) {
                         let mut new_dir_node = model::Dir {
                             name: entry.file_name().to_string_lossy().to_string(),
                             files: HashMap::new(),
@@ -213,12 +320,46 @@ pub fn naive_scan(target: &str, app: AppHandle) -> Result<model::Dir, AppError> 
                         new_dir_node.meta.num_subdir = new_dir_node.subdirs.len() as u64;
                         new_dir_node.meta.size = current_dir_size; // accumulated length should be here
 
-                        hash_store_dir.insert(entry.path().to_path_buf(), new_dir_node);
+                        if event_mode == ScanEventMode::Live {
+                            flush_live_file_batch(
+                                &app,
+                                &mut pending_file_updates,
+                                &mut pending_file_count,
+                                true,
+                            )?;
+
+                            emit_live_scan_entry(
+                                &app,
+                                LiveScanEntryEvent {
+                                    entry_type: "directory".to_string(),
+                                    path: entry_path_string,
+                                    parent_path: entry_parent_path,
+                                    name: new_dir_node.name.clone(),
+                                    id: new_dir_node.id.to_string(),
+                                    size: new_dir_node.meta.size,
+                                    num_files: new_dir_node.meta.num_files,
+                                    num_subdir: new_dir_node.meta.num_subdir,
+                                    created: new_dir_node.meta.created,
+                                    modified: new_dir_node.meta.modified,
+                                },
+                            )?;
+                        }
+
+                        hash_store_dir.insert(entry_path, new_dir_node);
                     }
                 }
             }
             // Originially there was an else block here but choose to ignore symlinks and other stuff
         }
+    }
+
+    if event_mode == ScanEventMode::Live {
+        flush_live_file_batch(
+            &app,
+            &mut pending_file_updates,
+            &mut pending_file_count,
+            true,
+        )?;
     }
 
     // If the structure of the disk scanned then it has only 1 root

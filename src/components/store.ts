@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { AnalysisMode, BackendError, CurrentEntryDetails, DirView, DirViewChildren, TreeDataNode } from "@/types";
+import { AnalysisMode, BackendError, CurrentEntryDetails, DirView, DirViewChildren, LiveScanEntryEvent, LiveScanFileBatchEvent, TreeDataNode } from "@/types";
 import { appendPaths } from "@/lib/utils";
 import { SnapshotFile } from "./data_table_columns";
 
@@ -16,6 +16,8 @@ export const clearHistoryCache = () => {
 interface FrontEndFileSystemStore {
   root: TreeDataNode;
   analysisMode: AnalysisMode;
+  liveScanStatus: "idle" | "scanning" | "complete" | "error";
+  liveScanEntryCount: number;
   activeSnapshotFile: string;
   newerSnapshotFile: string;
   olderSnapshotFile: string;
@@ -28,6 +30,11 @@ interface FrontEndFileSystemStore {
   changeCurrentOverviewNode: (currentTreeNode: TreeDataNode) => void;
   changeCurrentPath: (path: string) => void;
   changeCurrentEntryDetails: (numsubdir: number, numsubfile: number) => void;
+  beginLiveScan: (rootPath: string) => void;
+  applyLiveScanEntry: (entry: LiveScanEntryEvent) => void;
+  applyLiveScanFileBatch: (batch: LiveScanFileBatchEvent) => void;
+  finishLiveScan: (inital: DirView, rootPath: string) => void;
+  failLiveScan: () => void;
   initDirData: (inital: DirView, rootPath: string) => void;
   initSnapshotPreviewData: (initial: DirView, snapshotFile: string) => void;
   initSnapshotCompareData: (initial: DirView, newerSnapshotFile: string, olderSnapshotFile: string) => void;
@@ -159,6 +166,8 @@ const mapDirViewChildrenToTreeNodes = (
     modified: new Date(subdir.meta.modified.secs_since_epoch * 1000),
     path: subdir.path ?? appendPaths(currentNode.path, subdir.name),
     children: [],
+    childrenLoaded: false,
+    scanDiscovered: true,
     directory: true,
   }));
 
@@ -182,6 +191,165 @@ const mapDirViewChildrenToTreeNodes = (
   return [...subdirs, ...files];
 };
 
+const timeFromBackend = (time: { secs_since_epoch: number }) =>
+  new Date(time.secs_since_epoch * 1000);
+
+const makeLiveRootNode = (rootPath: string): TreeDataNode => ({
+  id: `live:${rootPath}`,
+  name: rootPath,
+  path: rootPath,
+  children: [],
+  childrenLoaded: false,
+  scanDiscovered: true,
+  size: 0,
+  numsubdir: 0,
+  numsubfiles: 0,
+  directory: true,
+});
+
+const makeLivePlaceholderDir = (path: string, name: string): TreeDataNode => ({
+  id: `live:${path}`,
+  name,
+  path,
+  children: [],
+  childrenLoaded: false,
+  scanDiscovered: false,
+  size: 0,
+  numsubdir: 0,
+  numsubfiles: 0,
+  directory: true,
+});
+
+const findNodeByPath = (node: TreeDataNode, path?: string): TreeDataNode | undefined => {
+  if (!path) return undefined;
+  if (node.path === path) return node;
+
+  for (const child of node.children ?? []) {
+    const found = findNodeByPath(child, path);
+    if (found) return found;
+  }
+
+  return undefined;
+};
+
+const getPathSegmentsFromRoot = (rootPath: string, fullPath: string): string[] => {
+  if (!fullPath || fullPath === rootPath || !fullPath.startsWith(rootPath)) {
+    return [];
+  }
+
+  return fullPath
+    .slice(rootPath.length)
+    .split(/[\\/]+/)
+    .filter(Boolean);
+};
+
+const ensureDirectoryPath = (root: TreeDataNode, targetPath: string): TreeDataNode => {
+  if (!targetPath || targetPath === root.path) {
+    return root;
+  }
+
+  const rootPath = root.path ?? "";
+  const segments = getPathSegmentsFromRoot(rootPath, targetPath);
+  let current = root;
+  let currentPath = rootPath;
+
+  for (const segment of segments) {
+    currentPath = appendPaths(currentPath, segment);
+    const children = current.children ?? [];
+    let next = children.find((child) => child.directory && child.path === currentPath);
+
+    if (!next) {
+      next = makeLivePlaceholderDir(currentPath, segment);
+      current.children = [...children, next];
+    }
+
+    current = next;
+  }
+
+  return current;
+};
+
+const getDirectoryPathChain = (root: TreeDataNode, targetPath: string): TreeDataNode[] => {
+  const chain = [root];
+  const rootPath = root.path ?? "";
+  const segments = getPathSegmentsFromRoot(rootPath, targetPath);
+  let current = root;
+  let currentPath = rootPath;
+
+  for (const segment of segments) {
+    currentPath = appendPaths(currentPath, segment);
+    current = ensureDirectoryPath(current, currentPath);
+    chain.push(current);
+  }
+
+  return chain;
+};
+
+const cloneForCurrentEntry = (node: TreeDataNode): TreeDataNode => ({
+  ...node,
+  children: node.children,
+});
+
+const applyLiveScanEntryMutation = (root: TreeDataNode, entry: LiveScanEntryEvent): boolean => {
+  if (!root.path || !entry.path.startsWith(root.path)) {
+    return false;
+  }
+
+  const node = ensureDirectoryPath(root, entry.path);
+  const wasDiscovered = node.scanDiscovered === true;
+  const oldSize = node.size ?? 0;
+  const nextSize = entry.size ?? 0;
+
+  if (!wasDiscovered && entry.path !== root.path && entry.parent_path) {
+    const parent = ensureDirectoryPath(root, entry.parent_path);
+    parent.numsubdir = (parent.numsubdir ?? 0) + 1;
+  }
+
+  node.id = entry.id;
+  node.name = entry.name;
+  node.size = nextSize;
+  node.numsubfiles = entry.num_files;
+  node.numsubdir = entry.num_subdir;
+  node.created = timeFromBackend(entry.created);
+  node.modified = timeFromBackend(entry.modified);
+  node.scanDiscovered = true;
+  node.childrenLoaded = false;
+
+  const delta = nextSize - oldSize;
+  if (delta !== 0 && entry.path !== root.path && entry.parent_path) {
+    const parentChain = getDirectoryPathChain(root, entry.parent_path);
+    parentChain.forEach((ancestor) => {
+      ancestor.size = (ancestor.size ?? 0) + delta;
+    });
+  }
+
+  return true;
+};
+
+const applyLiveScanFileBatchMutation = (
+  root: TreeDataNode,
+  batch: LiveScanFileBatchEvent
+): number => {
+  let appliedCount = 0;
+
+  for (const update of batch.updates) {
+    if (!root.path || !update.parent_path.startsWith(root.path)) {
+      continue;
+    }
+
+    const parent = ensureDirectoryPath(root, update.parent_path);
+    const chain = getDirectoryPathChain(root, update.parent_path);
+
+    chain.forEach((node) => {
+      node.size = (node.size ?? 0) + update.size;
+    });
+    parent.numsubfiles = (parent.numsubfiles ?? 0) + update.file_count;
+    appliedCount += update.file_count;
+  }
+
+  return appliedCount;
+};
+
 export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
   root:
   {
@@ -189,11 +357,16 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
     name: "Root",
     path: "/",
     children: [],
+    childrenLoaded: false,
     size: 0,
     directory: true,
   },
 
   analysisMode: "live-scan",
+
+  liveScanStatus: "idle",
+
+  liveScanEntryCount: 0,
 
   activeSnapshotFile: "",
 
@@ -207,6 +380,7 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
     name: "Root",
     path: "/",
     children: [],
+    childrenLoaded: false,
     size: 0,
     directory: true,
   },
@@ -257,6 +431,7 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
 
         // Mutate the node reference directly
         currentNode.children = newChildren;
+        currentNode.childrenLoaded = true;
 
         // FORCE RE-RENDER:
         return {
@@ -287,6 +462,121 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
   changeCurrentOverviewNode: (currentTreeNode) =>
     set({ currentEntryData: currentTreeNode }),
 
+  beginLiveScan: (rootPath) => {
+    const liveRoot = makeLiveRootNode(rootPath);
+    set({
+      analysisMode: "live-scan",
+      liveScanStatus: "scanning",
+      liveScanEntryCount: 0,
+      activeSnapshotFile: "",
+      newerSnapshotFile: "",
+      olderSnapshotFile: "",
+      root: liveRoot,
+      currentEntryData: liveRoot,
+      currentPath: rootPath,
+      currentEntryDetail: {
+        numsubdir: 0,
+        numsubfile: 0,
+      },
+    });
+  },
+
+  applyLiveScanEntry: (entry) => {
+    userStore.setState((state) => {
+      if (state.liveScanStatus !== "scanning") {
+        return state;
+      }
+
+      const root = state.root;
+      if (!applyLiveScanEntryMutation(root, entry)) {
+        return state;
+      }
+
+      const activeNode = findNodeByPath(root, state.currentEntryData.path) ?? root;
+
+      return {
+        root: { ...root },
+        currentEntryData: cloneForCurrentEntry(activeNode),
+        liveScanEntryCount: state.liveScanEntryCount + 1,
+        currentEntryDetail: {
+          numsubdir: activeNode.numsubdir ?? 0,
+          numsubfile: activeNode.numsubfiles ?? 0,
+        },
+      };
+    });
+  },
+
+  applyLiveScanFileBatch: (batch) => {
+    if (batch.updates.length === 0) return;
+
+    userStore.setState((state) => {
+      if (state.liveScanStatus !== "scanning") {
+        return state;
+      }
+
+      const root = state.root;
+      const appliedCount = applyLiveScanFileBatchMutation(root, batch);
+
+      if (appliedCount === 0) {
+        return state;
+      }
+
+      const activeNode = findNodeByPath(root, state.currentEntryData.path) ?? root;
+
+      return {
+        root: { ...root },
+        currentEntryData: cloneForCurrentEntry(activeNode),
+        liveScanEntryCount: state.liveScanEntryCount + appliedCount,
+        currentEntryDetail: {
+          numsubdir: activeNode.numsubdir ?? 0,
+          numsubfile: activeNode.numsubfiles ?? 0,
+        },
+      };
+    });
+  },
+
+  finishLiveScan: (initial, rootPath) => {
+    userStore.setState((state) => {
+      const root = state.root.path === rootPath ? state.root : makeLiveRootNode(rootPath);
+
+      root.id = initial.id;
+      root.name = initial.name;
+      root.size = initial.meta.size;
+      root.numsubdir = initial.meta.num_subdir;
+      root.numsubfiles = initial.meta.num_files;
+      root.created = timeFromBackend(initial.meta.created);
+      root.modified = timeFromBackend(initial.meta.modified);
+      root.scanDiscovered = true;
+      root.childrenLoaded = false;
+      root.diff = initial.meta.diff ? {
+        new_flag: initial.meta.diff.new_dir_flag,
+        deleted_flag: initial.meta.diff.deleted_dir_flag,
+        prevnumsubdir: initial.meta.diff.prev_num_subdir,
+        prevnumfiles: initial.meta.diff.prev_num_files,
+        prevsize: initial.meta.diff.previous_size,
+      } : undefined;
+
+      const activeNode = findNodeByPath(root, state.currentEntryData.path) ?? root;
+
+      return {
+        analysisMode: "live-scan",
+        liveScanStatus: "complete",
+        activeSnapshotFile: "",
+        newerSnapshotFile: "",
+        olderSnapshotFile: "",
+        root: { ...root },
+        currentEntryData: cloneForCurrentEntry(activeNode),
+        currentPath: activeNode.path ?? rootPath,
+        currentEntryDetail: {
+          numsubdir: activeNode.numsubdir ?? 0,
+          numsubfile: activeNode.numsubfiles ?? 0,
+        },
+      };
+    });
+  },
+
+  failLiveScan: () => set({ liveScanStatus: "error" }),
+
   setAnalysisMode: (mode) =>
     set({ analysisMode: mode }),
 
@@ -308,6 +598,8 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
         numsubdir: initial.meta.num_subdir,
         numsubfiles: initial.meta.num_files,
         children: [],
+        childrenLoaded: false,
+        scanDiscovered: true,
         // sql stuff
         diff: initial.meta.diff ? {
           new_flag: initial.meta.diff.new_dir_flag,
@@ -321,6 +613,7 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
 
       return { // init current states
         analysisMode: "live-scan",
+        liveScanStatus: "complete",
         activeSnapshotFile: "",
         newerSnapshotFile: "",
         olderSnapshotFile: "",
@@ -342,6 +635,8 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
         numsubdir: initial.meta.num_subdir,
         numsubfiles: initial.meta.num_files,
         children: [],
+        childrenLoaded: false,
+        scanDiscovered: true,
         diff: initial.meta.diff ? {
           new_flag: initial.meta.diff.new_dir_flag,
           deleted_flag: initial.meta.diff.deleted_dir_flag,
@@ -355,6 +650,7 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
 
       return {
         analysisMode: "snapshot-preview",
+        liveScanStatus: "idle",
         activeSnapshotFile: snapshotFile,
         newerSnapshotFile: "",
         olderSnapshotFile: "",
@@ -375,6 +671,8 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
         numsubdir: initial.meta.num_subdir,
         numsubfiles: initial.meta.num_files,
         children: [],
+        childrenLoaded: false,
+        scanDiscovered: true,
         diff: initial.meta.diff ? {
           new_flag: initial.meta.diff.new_dir_flag,
           deleted_flag: initial.meta.diff.deleted_dir_flag,
@@ -387,6 +685,7 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
 
       return {
         analysisMode: "snapshot-compare",
+        liveScanStatus: "idle",
         activeSnapshotFile: "",
         newerSnapshotFile,
         olderSnapshotFile,

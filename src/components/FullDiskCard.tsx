@@ -57,23 +57,23 @@ const FullDiskCard: React.FC<SplashPageProps> = ({ setWhichField }) => {
 
     const runScan = async (target: string) => {
         try {
+            const store = userStore.getState();
+            store.beginLiveScan(target);
+            setWhichField(false);
 
             console.time("invoke");
             const result = await invoke<DirView>('disk_scan', { target, snapshotFile, snapshotFlag });
             console.timeEnd("invoke");
-
-            const zustandInitFunc = userStore.getState().initDirData;
 
             if (saveCurrentSnapshotFlag) {
                 const selectedDisk = target
                 const temp = await invoke('write_current_tree', { selectedDisk });
             }
 
-            zustandInitFunc(result, target);
-
-            setWhichField(false); // state switch to anallytics screen
+            userStore.getState().finishLiveScan(result, target);
 
         } catch (e) {
+            userStore.getState().failLiveScan();
             setCurrentBackendError(e)
             console.log(e)
         }

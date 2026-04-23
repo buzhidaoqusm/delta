@@ -99,6 +99,8 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
   const { paddingLeft, ...restStyle } = style;
 
   // Handle current entry size
+  const isDirectory = node.data.directory === true;
+
   let current_size = node.data.diff?.deleted_flag ? ("0 B") : (formatBytes(node.data.size));
 
   // Handle prev entry size
@@ -165,10 +167,18 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
         userStore.getState().changeCurrentOverviewNode(node.data)
         useDirEntryHistoryStore.getState().queryDirEntryHistory(root, node.data.path)
 
-        if (!node.isOpen && !node.isLeaf && (!node.data.children || node.data.children.length === 0)) {
+        const liveScanStatus = userStore.getState().liveScanStatus;
+        if (
+          isDirectory &&
+          !node.data.childrenLoaded &&
+          liveScanStatus !== "scanning" &&
+          !node.data.diff?.deleted_flag
+        ) {
           userStore.getState().addNewDirView(node.data, parsePathToSegment(root, node.data.path));
         }
-        node.toggle();
+        if (isDirectory) {
+          node.toggle();
+        }
       }}
       onMouseEnter={
         () => {
@@ -195,7 +205,7 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
       <div className={`flex flex-1 items-center border-b border-gray-600/50 min-w-0 ${row_bg_color}`}>
         <div className="flex-1 flex items-center min-w-0 pr-4">
           <div className="mr-2 flex-shrink-0 text-gray-400">
-            {node.isLeaf ? (
+            {!isDirectory ? (
               <File className="h-4 w-4 text-sky-400" />
             ) : (
               node.isOpen ? <FolderOpen className="h-4 w-4 text-amber-400" /> : <Folder className="h-4 w-4 text-amber-400" />

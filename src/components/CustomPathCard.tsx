@@ -30,15 +30,15 @@ const CustomPathCard: React.FC<SplashPageProps> = ({ setWhichField }) => {
 
     const runScan = async (target: string) => {
         try {
+            userStore.getState().beginLiveScan(target);
+            setWhichField(false);
+
             const result = await invoke<DirView>('disk_scan', { target, snapshotFile, snapshotFlag: false }); // always flag set to false
 
-            const zustandInitFunc = userStore.getState().initDirData;
-
-            zustandInitFunc(result, target);
-
-            setWhichField(false); // state switch to anallytics screen
+            userStore.getState().finishLiveScan(result, target);
 
         } catch (e) {
+            userStore.getState().failLiveScan();
             setCurrentBackendError(e)
         }
     }

@@ -14,6 +14,8 @@ const TopBar = ({ onHomeClick }: TopBarProps) => {
     const { t } = useTranslation()
     const currentPath = userStore((state) => state.currentPath)
     const currentEntryDetails = userStore((state) => state.currentEntryDetail)
+    const liveScanStatus = userStore((state) => state.liveScanStatus)
+    const liveScanEntryCount = userStore((state) => state.liveScanEntryCount)
     let numsubdir = currentEntryDetails.numsubdir ? String(currentEntryDetails.numsubdir) : ("0");
     let numsubfile = currentEntryDetails.numsubfile ? String(currentEntryDetails.numsubfile) : ("0");
 
@@ -36,6 +38,12 @@ const TopBar = ({ onHomeClick }: TopBarProps) => {
                         variant="outline">
                         {currentPath}
                     </Badge>
+                    {liveScanStatus === "scanning" && (
+                        <Badge className="h-5 min-w-5 rounded-full px-1 font-mono text-green-400 tabular-nums"
+                            variant="outline">
+                            {`Scanning: ${liveScanEntryCount}`}
+                        </Badge>
+                    )}
                 </div>
 
             </div>

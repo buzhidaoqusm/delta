@@ -50,7 +50,6 @@ pub fn run() {
                 }
             };
 
-            
             if let Err(e) = startup::startup_checks(&local_app_data_path) {
                 if is_background_scan {
                     let _ = auto_scan::record_background_error(
@@ -82,7 +81,7 @@ pub fn run() {
 
             let state = BackendState {
                 file_tree: std::sync::Mutex::new(None),
-                local_appdata_path: Some(local_app_data_path.clone()), 
+                local_appdata_path: Some(local_app_data_path.clone()),
             };
             app.manage(state);
 
