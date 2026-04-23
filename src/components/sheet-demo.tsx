@@ -10,7 +10,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet"
 import { invoke } from "@tauri-apps/api/core"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { SnapshotFile } from "./data_table_columns"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "./ui/card"
 import { createSnapshotColumns } from './data_table_columns'
@@ -48,6 +48,7 @@ import { AutoScanSettings } from "./AutoScanSettings"
 export function SettingsPage() {
   const { t, i18n } = useTranslation()
 
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const snapshotFiles = snapshotStore((state) => state.previousSnapshots)
   const setSnapshotFiles = snapshotStore((state) => state.setPreviousSnapshots)
   const columns = createSnapshotColumns(t, i18n.resolvedLanguage ?? i18n.language)
@@ -56,6 +57,27 @@ export function SettingsPage() {
 
   // define variables to get gloval error stuff
   const setCurrentBackendError = useErrorStore((state) => state.setCurrentBackendError)
+
+  const clearBodyPointerLock = useCallback(() => {
+    if (document.body.style.pointerEvents === "none") {
+      document.body.style.pointerEvents = "";
+    }
+  }, []);
+
+  const handleSettingsOpenChange = useCallback((open: boolean) => {
+    setSettingsOpen(open);
+
+    if (!open) {
+      window.requestAnimationFrame(clearBodyPointerLock);
+      window.setTimeout(clearBodyPointerLock, 350);
+    }
+  }, [clearBodyPointerLock]);
+
+  useEffect(() => {
+    return () => {
+      clearBodyPointerLock();
+    };
+  }, [clearBodyPointerLock]);
 
   useEffect(() => {
     const fetchFiles = async () => {
@@ -95,7 +117,7 @@ export function SettingsPage() {
   }
 
   return (
-    <Sheet>
+    <Sheet open={settingsOpen} onOpenChange={handleSettingsOpenChange}>
       <SheetTrigger asChild>
         <Button variant="outline" size="icon" className="h-7 w-7">
           <Settings></Settings>
