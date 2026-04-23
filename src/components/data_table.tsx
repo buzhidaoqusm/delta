@@ -41,17 +41,22 @@ interface DataTableProps<TData, TValue> {
   rowSelection: RowSelectionState
   setRowSelection: OnChangeFn<RowSelectionState>
   onRowDoubleClick?: (row: TData) => void
+  maxSelectedRows?: number
 }
 
 // making the datatable generic with the input types
-export function DataTable<TData, TValue>({columns, data, rowSelection, setRowSelection, onRowDoubleClick}: DataTableProps<TData, TValue>) {
+export function DataTable<TData, TValue>({columns, data, rowSelection, setRowSelection, onRowDoubleClick, maxSelectedRows = 1}: DataTableProps<TData, TValue>) {
   const { t } = useTranslation()
   const table = useReactTable({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
     enableRowSelection: true,
-    enableMultiRowSelection: false,
+    enableMultiRowSelection: (row) => {
+      if (maxSelectedRows <= 1) return false;
+      const selectedCount = Object.keys(rowSelection).length;
+      return row.getIsSelected() || selectedCount < maxSelectedRows;
+    },
     onRowSelectionChange: setRowSelection,
     state: {
       rowSelection,

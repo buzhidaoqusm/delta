@@ -70,6 +70,8 @@ pub fn run() {
             database::delete_snapshot_file,
             database::open_snapshot_preview,
             database::query_snapshot_dir_object,
+            database::compare_snapshots,
+            database::query_snapshot_compare_dir_object,
             database::get_path_historical_data,
         ])
         .run(tauri::generate_context!())

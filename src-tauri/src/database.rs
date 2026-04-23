@@ -41,6 +41,11 @@ struct SnapshotEntryRow {
     modified: i64,
 }
 
+struct SnapshotMetaRow {
+    root_path: String,
+    created_at: String,
+}
+
 fn system_time_to_secs(time: SystemTime) -> i64 {
     time.duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs() as i64)
@@ -157,6 +162,163 @@ fn row_to_snapshot_entry(row: &rusqlite::Row<'_>) -> Result<SnapshotEntryRow, ru
         created: row.get(7)?,
         modified: row.get(8)?,
     })
+}
+
+fn read_snapshot_meta(db_path: &Path) -> Result<SnapshotMetaRow, AppError> {
+    let conn = Connection::open(db_path)?;
+    let meta = conn.query_row(
+        "SELECT schema_version, root_path, root_name, created_at, total_size
+         FROM snapshot_meta
+         LIMIT 1",
+        [],
+        |row| {
+            Ok(SnapshotMetaRow {
+                root_path: row.get(1)?,
+                created_at: row.get(3)?,
+            })
+        },
+    )?;
+
+    Ok(meta)
+}
+
+fn validate_v2_snapshot(db_path: &Path) -> Result<SnapshotMetaRow, AppError> {
+    let capability = read_snapshot_capability(db_path)?;
+    if !capability.can_compare {
+        return Err(AppError::GeneralLogicalErr(
+            "Old snapshots cannot be compared. Create new snapshots to use compare.".to_string(),
+        ));
+    }
+
+    read_snapshot_meta(db_path)
+}
+
+fn order_snapshot_paths_by_created_at(
+    first_path: PathBuf,
+    second_path: PathBuf,
+) -> Result<(PathBuf, PathBuf), AppError> {
+    let first_meta = read_snapshot_meta(&first_path)?;
+    let second_meta = read_snapshot_meta(&second_path)?;
+
+    if first_meta.created_at >= second_meta.created_at {
+        Ok((first_path, second_path))
+    } else {
+        Ok((second_path, first_path))
+    }
+}
+
+fn entry_to_dir_view_with_diff(
+    entry: SnapshotEntryRow,
+    previous: Option<&SnapshotEntryRow>,
+    new_flag: bool,
+    deleted_flag: bool,
+) -> model::DirView {
+    model::DirView {
+        meta: model::DirViewMeta {
+            size: entry.size as u64,
+            num_files: entry.sub_file_count as u64,
+            num_subdir: entry.sub_folder_count as u64,
+            diff: Some(model::DirViewMetaDiff {
+                new_dir_flag: new_flag,
+                deleted_dir_flag: deleted_flag,
+                previous_size: previous.map(|row| row.size as u64).unwrap_or(0),
+                prev_num_files: previous
+                    .map(|row| row.sub_file_count as u64)
+                    .unwrap_or(0),
+                prev_num_subdir: previous
+                    .map(|row| row.sub_folder_count as u64)
+                    .unwrap_or(0),
+            }),
+            created: secs_to_system_time(entry.created),
+            modified: secs_to_system_time(entry.modified),
+        },
+        name: entry.name,
+        id: entry.id.to_string(),
+        path: Some(entry.path),
+    }
+}
+
+fn entry_to_file_view_with_diff(
+    entry: SnapshotEntryRow,
+    previous: Option<&SnapshotEntryRow>,
+    new_flag: bool,
+    deleted_flag: bool,
+) -> model::FileView {
+    model::FileView {
+        meta: model::FileViewMeta {
+            size: entry.size as u64,
+            diff: Some(model::FileViewMetaDiff {
+                new_file_flag: new_flag,
+                deleted_file_flag: deleted_flag,
+                previous_size: previous.map(|row| row.size as u64).unwrap_or(0),
+            }),
+            created: secs_to_system_time(entry.created),
+            modified: secs_to_system_time(entry.modified),
+        },
+        name: entry.name,
+        id: entry.id.to_string(),
+        path: Some(entry.path),
+    }
+}
+
+fn diff_snapshot_children(
+    newer_children: Vec<SnapshotEntryRow>,
+    older_children: Vec<SnapshotEntryRow>,
+) -> model::DirViewChildren {
+    let mut older_by_id: HashMap<i64, SnapshotEntryRow> = older_children
+        .into_iter()
+        .map(|entry| (entry.id, entry))
+        .collect();
+    let mut dir_views = Vec::new();
+    let mut file_views = Vec::new();
+
+    for newer_entry in newer_children {
+        let older_entry = older_by_id.remove(&newer_entry.id);
+        let is_dir = newer_entry.dir_flag;
+        let new_flag = older_entry.is_none();
+
+        if is_dir {
+            dir_views.push(entry_to_dir_view_with_diff(
+                newer_entry,
+                older_entry.as_ref(),
+                new_flag,
+                false,
+            ));
+        } else {
+            file_views.push(entry_to_file_view_with_diff(
+                newer_entry,
+                older_entry.as_ref(),
+                new_flag,
+                false,
+            ));
+        }
+    }
+
+    for (_, older_entry) in older_by_id {
+        if older_entry.dir_flag {
+            dir_views.push(entry_to_dir_view_with_diff(
+                older_entry,
+                None,
+                false,
+                true,
+            ));
+        } else {
+            file_views.push(entry_to_file_view_with_diff(
+                older_entry,
+                None,
+                false,
+                true,
+            ));
+        }
+    }
+
+    dir_views.sort_by_key(|entry| std::cmp::Reverse(entry.meta.size));
+    file_views.sort_by_key(|entry| std::cmp::Reverse(entry.meta.size));
+
+    model::DirViewChildren {
+        subdirviews: dir_views,
+        files: file_views,
+    }
 }
 
 fn entry_to_dir_view(entry: SnapshotEntryRow) -> model::DirView {
@@ -649,6 +811,65 @@ pub fn query_snapshot_dir_object(
         subdirviews: dir_views,
         files: file_views,
     })
+}
+
+#[tauri::command]
+pub fn compare_snapshots(
+    first_snapshot_file_name: String,
+    second_snapshot_file_name: String,
+    state: tauri::State<'_, BackendState>,
+) -> Result<model::DirView, AppError> {
+    let first_path = snapshot_db_path(&state, &first_snapshot_file_name);
+    let second_path = snapshot_db_path(&state, &second_snapshot_file_name);
+    let first_meta = validate_v2_snapshot(&first_path)?;
+    let second_meta = validate_v2_snapshot(&second_path)?;
+
+    if first_meta.root_path != second_meta.root_path {
+        return Err(AppError::GeneralLogicalErr(
+            "Snapshots must belong to the same disk or root path.".to_string(),
+        ));
+    }
+
+    let (newer_path, older_path) = order_snapshot_paths_by_created_at(first_path, second_path)?;
+    let newer_conn = Connection::open(newer_path)?;
+    let older_conn = Connection::open(older_path)?;
+    let newer_root = query_snapshot_entry_by_parent_null(&newer_conn)?;
+    let older_root = query_snapshot_entry_by_parent_null(&older_conn)?;
+
+    Ok(entry_to_dir_view_with_diff(
+        newer_root,
+        Some(&older_root),
+        false,
+        false,
+    ))
+}
+
+#[tauri::command]
+pub fn query_snapshot_compare_dir_object(
+    newer_snapshot_file_name: String,
+    older_snapshot_file_name: String,
+    parent_id: String,
+    state: tauri::State<'_, BackendState>,
+) -> Result<model::DirViewChildren, AppError> {
+    let newer_path = snapshot_db_path(&state, &newer_snapshot_file_name);
+    let older_path = snapshot_db_path(&state, &older_snapshot_file_name);
+    let newer_meta = validate_v2_snapshot(&newer_path)?;
+    let older_meta = validate_v2_snapshot(&older_path)?;
+
+    if newer_meta.root_path != older_meta.root_path {
+        return Err(AppError::GeneralLogicalErr(
+            "Snapshots must belong to the same disk or root path.".to_string(),
+        ));
+    }
+
+    let parent_id = parent_id.parse::<i64>()?;
+    let newer_conn = Connection::open(newer_path)?;
+    let older_conn = Connection::open(older_path)?;
+
+    let newer_children = query_snapshot_children(&newer_conn, parent_id).unwrap_or_default();
+    let older_children = query_snapshot_children(&older_conn, parent_id).unwrap_or_default();
+
+    Ok(diff_snapshot_children(newer_children, older_children))
 }
 
 // pub fn get_path_historical_data(

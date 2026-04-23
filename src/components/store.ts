@@ -17,6 +17,8 @@ interface FrontEndFileSystemStore {
   root: TreeDataNode;
   analysisMode: AnalysisMode;
   activeSnapshotFile: string;
+  newerSnapshotFile: string;
+  olderSnapshotFile: string;
   currentPath: string; // used for the temporary onhover path thing
   currentEntryDetail: CurrentEntryDetails; // used for the quick detail at top bar
   currentEntryData: TreeDataNode; // used for the side overview
@@ -28,6 +30,7 @@ interface FrontEndFileSystemStore {
   changeCurrentEntryDetails: (numsubdir: number, numsubfile: number) => void;
   initDirData: (inital: DirView, rootPath: string) => void;
   initSnapshotPreviewData: (initial: DirView, snapshotFile: string) => void;
+  initSnapshotCompareData: (initial: DirView, newerSnapshotFile: string, olderSnapshotFile: string) => void;
   setAnalysisMode: (mode: AnalysisMode) => void;
   setActiveSnapshotFile: (snapshotFile: string) => void;
   setSnapshotFlag: (flag: boolean) => void;
@@ -194,6 +197,10 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
 
   activeSnapshotFile: "",
 
+  newerSnapshotFile: "",
+
+  olderSnapshotFile: "",
+
   currentEntryData:
   {
     id: "root",
@@ -222,15 +229,28 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
       const { prevSnapshotFilePath } = get();
       const { analysisMode } = get();
 
-      const result: DirViewChildren = analysisMode === "snapshot-preview"
-        ? await invoke<DirViewChildren>(
+      let result: DirViewChildren;
+
+      if (analysisMode === "snapshot-preview") {
+        result = await invoke<DirViewChildren>(
           'query_snapshot_dir_object',
           { snapshotFileName: get().activeSnapshotFile, parentId: currentNode.id }
-        )
-        : await invoke<DirViewChildren>(
+        );
+      } else if (analysisMode === "snapshot-compare") {
+        result = await invoke<DirViewChildren>(
+          'query_snapshot_compare_dir_object',
+          {
+            newerSnapshotFileName: get().newerSnapshotFile,
+            olderSnapshotFileName: get().olderSnapshotFile,
+            parentId: currentNode.id,
+          }
+        );
+      } else {
+        result = await invoke<DirViewChildren>(
           'query_new_dir_object',
           { pathList, snapshotFlag, prevSnapshotFilePath }
         );
+      }
 
       userStore.setState((state) => {
         const newChildren = mapDirViewChildrenToTreeNodes(result, currentNode);
@@ -302,6 +322,8 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
       return { // init current states
         analysisMode: "live-scan",
         activeSnapshotFile: "",
+        newerSnapshotFile: "",
+        olderSnapshotFile: "",
         root: initRoot,
         currentEntryData: initRoot,
         currentPath: initial.name,
@@ -334,6 +356,40 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
       return {
         analysisMode: "snapshot-preview",
         activeSnapshotFile: snapshotFile,
+        newerSnapshotFile: "",
+        olderSnapshotFile: "",
+        root: initRoot,
+        currentEntryData: initRoot,
+        currentPath: initRoot.path,
+      };
+    });
+  },
+
+  initSnapshotCompareData: (initial, newerSnapshotFile, olderSnapshotFile) => {
+    userStore.setState((state) => {
+      const initRoot = {
+        id: initial.id,
+        name: initial.name,
+        size: initial.meta.size,
+        path: initial.path ?? initial.name,
+        numsubdir: initial.meta.num_subdir,
+        numsubfiles: initial.meta.num_files,
+        children: [],
+        diff: initial.meta.diff ? {
+          new_flag: initial.meta.diff.new_dir_flag,
+          deleted_flag: initial.meta.diff.deleted_dir_flag,
+          prevnumsubdir: initial.meta.diff.prev_num_subdir,
+          prevnumfiles: initial.meta.diff.prev_num_files,
+          prevsize: initial.meta.diff.previous_size,
+        } : undefined,
+        directory: true,
+      };
+
+      return {
+        analysisMode: "snapshot-compare",
+        activeSnapshotFile: "",
+        newerSnapshotFile,
+        olderSnapshotFile,
         root: initRoot,
         currentEntryData: initRoot,
         currentPath: initRoot.path,

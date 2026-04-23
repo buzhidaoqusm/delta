@@ -54,7 +54,11 @@
     "deleteTitle": "Delete Snapshot?",
     "deleteDescription": "This will permanently delete the selected snapshot from your disk.",
     "legacyBadge": "Old",
-    "legacyPreviewUnsupported": "Old snapshots cannot be previewed. Create a new snapshot to use preview."
+    "legacyPreviewUnsupported": "Old snapshots cannot be previewed. Create a new snapshot to use preview.",
+    "compareSnapshots": "Compare Snapshots",
+    "compareSelectTwo": "Select two snapshots to compare.",
+    "compareRequiresNew": "Only newer snapshot files can be compared.",
+    "compareRequiresSameRoot": "Snapshots must belong to the same disk or root path."
   },
   "settings": {
     "title": "Settings",

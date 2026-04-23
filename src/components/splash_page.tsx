@@ -55,6 +55,29 @@ const SplashPage: React.FC<SplashPageProps> = ({ setWhichField }) => {
   const snapshotFileName = (snapshot: SnapshotFile) =>
     `${snapshot.drive_letter}_${snapshot.date_sort_key}_${snapshot.size}`
 
+  const selectedSnapshots = Object.keys(rowSelection)
+    .map((index) => snapshotFiles[Number(index)])
+    .filter(Boolean)
+
+  const getCompareDisabledReason = (snapshots: SnapshotFile[]) => {
+    if (snapshots.length !== 2) return t("snapshot.compareSelectTwo")
+    if (!snapshots.every((snapshot) => snapshot.can_compare)) {
+      return t("snapshot.compareRequiresNew")
+    }
+
+    const [first, second] = snapshots
+    if (first.root_path && second.root_path && first.root_path !== second.root_path) {
+      return t("snapshot.compareRequiresSameRoot")
+    }
+    if (!first.root_path && !second.root_path && first.drive_letter !== second.drive_letter) {
+      return t("snapshot.compareRequiresSameRoot")
+    }
+
+    return ""
+  }
+
+  const compareDisabledReason = getCompareDisabledReason(selectedSnapshots)
+
   const openSnapshotPreview = async (snapshot: SnapshotFile) => {
     if (!snapshot.can_preview) {
       setCurrentBackendError({
@@ -71,6 +94,28 @@ const SplashPage: React.FC<SplashPageProps> = ({ setWhichField }) => {
       })
 
       userStore.getState().initSnapshotPreviewData(result, snapshotFileName(snapshot))
+      setWhichField(false)
+    } catch (err) {
+      setCurrentBackendError(err)
+    }
+  }
+
+  const runSnapshotCompare = async () => {
+    if (compareDisabledReason || selectedSnapshots.length !== 2) return
+
+    try {
+      const [first, second] = selectedSnapshots
+      const result = await invoke<DirView>('compare_snapshots', {
+        firstSnapshotFileName: snapshotFileName(first),
+        secondSnapshotFileName: snapshotFileName(second),
+      })
+
+      const ordered = [first, second].sort((a, b) => b.date_sort_key - a.date_sort_key)
+      userStore.getState().initSnapshotCompareData(
+        result,
+        snapshotFileName(ordered[0]),
+        snapshotFileName(ordered[1])
+      )
       setWhichField(false)
     } catch (err) {
       setCurrentBackendError(err)
@@ -94,11 +139,18 @@ const SplashPage: React.FC<SplashPageProps> = ({ setWhichField }) => {
 
   // for bridging selected snapshot file and zustand global state for it
   useEffect(() => {
-    const selectedIndex = Object.keys(rowSelection)[0] // Get "0"
-    const selectedData = snapshotFiles[parseInt(selectedIndex)]
+    const selectedIndexes = Object.keys(rowSelection)
+
+    if (selectedIndexes.length !== 1) {
+      setSnapshotFile("") // reset these on mount
+      setSnapshotFlag(false)
+      return;
+    }
+
+    const selectedData = snapshotFiles[parseInt(selectedIndexes[0])]
 
     if (!selectedData) {
-      setSnapshotFile("") // reset these on mount
+      setSnapshotFile("")
       setSnapshotFlag(false)
       return;
     }
@@ -117,14 +169,29 @@ const SplashPage: React.FC<SplashPageProps> = ({ setWhichField }) => {
         <img src={DeltaLogo} alt={t("app.logoAlt")} className='transition-all duration-500 hover:scale-150 hover:rotate-180 opacity-90 hover:opacity-100 cursor-pointer fixed bottom-9 right-9' />
 
         {/* Test data table for snapshots, datatable should be generic */}
-        <Card className='p-3 min-w-[350px]'>
+        <Card className='p-3 min-w-[350px] flex flex-col gap-3'>
           <DataTable
             columns={columns}
             data={snapshotFiles}
             rowSelection={rowSelection}
             setRowSelection={setRowSelection}
             onRowDoubleClick={openSnapshotPreview}
+            maxSelectedRows={2}
           ></DataTable>
+          <div className="flex flex-col gap-1">
+            <Button
+              variant="outline"
+              disabled={Boolean(compareDisabledReason)}
+              onClick={runSnapshotCompare}
+            >
+              {t("snapshot.compareSnapshots")}
+            </Button>
+            {compareDisabledReason && (
+              <p className="text-xs text-muted-foreground text-center">
+                {compareDisabledReason}
+              </p>
+            )}
+          </div>
         </Card>
 
         {/* disk scan tabs */}
