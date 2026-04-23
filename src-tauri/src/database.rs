@@ -463,35 +463,28 @@ pub fn query_children_stats_from_parent_id(
     return Ok(temp_ht);
 }
 
-// write to that string as db file name, and the frontend is sending that name over
-// TODO change selected_disk_letter to drive name! For linux need to handle it
-#[tauri::command]
-pub async fn write_current_tree(
-    state: tauri::State<'_, BackendState>,
-    selected_disk: String,
-) -> Result<(), AppError> {
-    let guard = state.file_tree.lock().unwrap();
-    if guard.is_none() {
-        return Ok(());
-    }
-    let root_ref = guard.as_ref().unwrap();
+#[derive(Debug, Clone)]
+pub struct WrittenSnapshot {
+    pub file_stem: String,
+}
+
+pub fn write_tree_snapshot(
+    root_ref: &model::Dir,
+    selected_disk: &str,
+    local_appdata_path: &Path,
+) -> Result<WrittenSnapshot, AppError> {
     let root_size_bytes = root_ref.meta.size;
-
     let local_time = Local::now();
-
-    let selected_disk_name = clean_disk_name(&selected_disk)?;
-
-    let temp_data_db_path = state
-        .local_appdata_path
-        .as_ref()
-        .unwrap()
-        .join("tempsnapshot")
-        .join(format!(
-            "{}_{}_{}.db",
-            selected_disk_name,
-            local_time.format("%Y%m%d%H%M").to_string(),
-            root_size_bytes.to_string()
-        ));
+    let selected_disk_name = clean_disk_name(selected_disk)?;
+    let temp_snapshot_dir = local_appdata_path.join("tempsnapshot");
+    fs::create_dir_all(&temp_snapshot_dir)?;
+    let file_stem = format!(
+        "{}_{}_{}",
+        selected_disk_name,
+        local_time.format("%Y%m%d%H%M"),
+        root_size_bytes
+    );
+    let temp_data_db_path = temp_snapshot_dir.join(format!("{file_stem}.db"));
 
     let mut conn = Connection::open(&temp_data_db_path)?;
 
@@ -561,7 +554,7 @@ pub async fn write_current_tree(
         params![
             SNAPSHOT_SCHEMA_VERSION_V2,
             selected_disk,
-            root_ref.name,
+            &root_ref.name,
             local_time.to_rfc3339(),
             root_size_bytes as i64
         ],
@@ -580,7 +573,7 @@ pub async fn write_current_tree(
         )?;
 
         let mut stack = Vec::new();
-        stack.push((Node::Dir(root_ref), None::<i64>, selected_disk.clone()));
+        stack.push((Node::Dir(root_ref), None::<i64>, selected_disk.to_string()));
 
         while let Some((node, real_parent_id, current_path)) = stack.pop() {
             let id: i64;
@@ -655,6 +648,30 @@ pub async fn write_current_tree(
     }
 
     temp_transaction.commit()?;
+
+    Ok(WrittenSnapshot {
+        file_stem,
+    })
+}
+
+// write to that string as db file name, and the frontend is sending that name over
+// TODO change selected_disk_letter to drive name! For linux need to handle it
+#[tauri::command]
+pub async fn write_current_tree(
+    state: tauri::State<'_, BackendState>,
+    selected_disk: String,
+) -> Result<(), AppError> {
+    let guard = state.file_tree.lock().unwrap();
+    let Some(root_ref) = guard.as_ref() else {
+        return Ok(());
+    };
+
+    let local_appdata_path = state
+        .local_appdata_path
+        .as_ref()
+        .ok_or_else(|| AppError::StartupError("Missing local app data path".to_string()))?;
+
+    write_tree_snapshot(root_ref, &selected_disk, local_appdata_path)?;
 
     Ok(())
 }
@@ -934,6 +951,8 @@ pub fn get_path_historical_data(
     absolute_path: String,
     state: tauri::State<'_, BackendState>,
 ) -> Result<Vec<(String, i64)>, AppError> {
+    let _ = root_path;
+
     let prev_data_db_path: std::path::PathBuf = state
         .local_appdata_path
         .as_ref()

@@ -70,6 +70,28 @@
     "historyGraph": "历史图表",
     "historyGraphDescription": "查看目录条目时启用历史大小图表。"
   },
+  "autoScan": {
+    "title": "开机自动扫描",
+    "description": "登录系统时扫描一个文件夹，并且只在满足间隔和变化阈值时保存快照。",
+    "enableOnStartup": "开机自动扫描",
+    "enableDescription": "Delta 会在登录时静默启动，满足条件时扫描，然后自动退出。",
+    "targetPath": "扫描路径",
+    "targetPlaceholder": "选择要扫描的文件夹",
+    "targetRequired": "开启开机自动扫描前，请先选择一个扫描文件夹。",
+    "chooseFolder": "选择文件夹",
+    "intervalDays": "扫描间隔（天）",
+    "thresholdGb": "保存阈值（GB）",
+    "lastRun": "上次运行",
+    "saving": "保存中...",
+    "status": {
+      "never_run": "尚未运行",
+      "success_saved": "已保存快照",
+      "success_skipped_threshold": "已扫描，但大小变化低于阈值，未保存快照",
+      "skipped_interval": "扫描间隔未到，已跳过",
+      "disabled": "已关闭",
+      "error": "出错"
+    }
+  },
   "tree": {
     "headers": {
       "name": "名称",

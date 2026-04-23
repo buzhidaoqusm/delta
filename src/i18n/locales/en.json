@@ -70,6 +70,28 @@
     "historyGraph": "History Graph",
     "historyGraphDescription": "Enable the historical size graph when viewing directory entries."
   },
+  "autoScan": {
+    "title": "Startup Auto Scan",
+    "description": "Scan one folder at login and save a snapshot only when it is due and changed enough.",
+    "enableOnStartup": "Auto scan on startup",
+    "enableDescription": "Delta will start quietly at login, scan if due, then exit.",
+    "targetPath": "Target path",
+    "targetPlaceholder": "Choose a folder to scan",
+    "targetRequired": "Choose a target folder before enabling startup auto scan.",
+    "chooseFolder": "Choose folder",
+    "intervalDays": "Scan interval (days)",
+    "thresholdGb": "Save threshold (GB)",
+    "lastRun": "Last run",
+    "saving": "Saving...",
+    "status": {
+      "never_run": "Never run",
+      "success_saved": "Snapshot saved",
+      "success_skipped_threshold": "Scanned, no snapshot saved because size change was below the threshold",
+      "skipped_interval": "Skipped because the interval has not elapsed",
+      "disabled": "Disabled",
+      "error": "Error"
+    }
+  },
   "tree": {
     "headers": {
       "name": "Name",

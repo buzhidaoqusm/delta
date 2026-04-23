@@ -20,6 +20,9 @@ pub enum AppError {
     #[error("Tauri error: {0}")]
     TauriError(#[from] tauri::Error),
 
+    #[error("Autostart error: {0}")]
+    AutostartError(#[from] tauri_plugin_autostart::Error),
+
     // Manual errs
     #[error("General error: {0}")]
     GeneralLogicalErr(String),
@@ -92,6 +95,11 @@ impl Serialize for AppError {
                 user_error_string_desc: "N/A".to_string(),
                 library_generated_error_desc: e.to_string(),
                 err_code: 9,
+            },
+            AppError::AutostartError(e) => BackendError {
+                user_error_string_desc: "N/A".to_string(),
+                library_generated_error_desc: e.to_string(),
+                err_code: 10,
             },
         };
 

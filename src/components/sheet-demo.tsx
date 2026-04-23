@@ -42,6 +42,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
+import { AutoScanSettings } from "./AutoScanSettings"
 
 
 export function SettingsPage() {
@@ -216,6 +217,8 @@ export function SettingsPage() {
               </div>
 
               <HistoryToggle></HistoryToggle>
+
+              <AutoScanSettings />
 
             </div>
           </div>

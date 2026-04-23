@@ -55,3 +55,27 @@ export interface DirViewChildren {
   subdirviews: DirView[];
   files: File[];
 }
+
+export type AutoScanStatus =
+  | "never_run"
+  | "success_saved"
+  | "success_skipped_threshold"
+  | "skipped_interval"
+  | "disabled"
+  | "error";
+
+export interface AutoScanConfig {
+  enabled: boolean;
+  target_path: string;
+  interval_days: number;
+  save_threshold_bytes: number;
+  last_scan_at?: string | null;
+  last_scan_size_bytes?: number | null;
+  last_snapshot_file?: string | null;
+  last_status: AutoScanStatus;
+  last_error?: string | null;
+}
+
+export interface AppConfig {
+  auto_scan: AutoScanConfig;
+}
