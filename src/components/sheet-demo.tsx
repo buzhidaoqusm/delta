@@ -10,7 +10,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet"
 import { invoke } from "@tauri-apps/api/core"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { SnapshotFile } from "./data_table_columns"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "./ui/card"
 import { createSnapshotColumns } from './data_table_columns'
@@ -53,7 +53,6 @@ export function SettingsPage() {
   const columns = createSnapshotColumns(t, i18n.resolvedLanguage ?? i18n.language)
 
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
-  const [selectedRowFileName, setSelectedRowFileName] = useState<String>("");
 
   // define variables to get gloval error stuff
   const setCurrentBackendError = useErrorStore((state) => state.setCurrentBackendError)
@@ -72,22 +71,19 @@ export function SettingsPage() {
     fetchFiles();
   }, []);
 
-  useEffect(() => {
-    const selectedIndex = Object.keys(rowSelection)[0];
-    if (!selectedIndex) {
-      setSelectedRowFileName("");
-      return;
-    }
-    const file = snapshotFiles[parseInt(selectedIndex)];
-    if (file) {
-      const pathString = `${file.drive_letter}_${file.date_sort_key}_${file.size}`;
-      setSelectedRowFileName(pathString);
-    }
+  const selectedRowFileNames = useMemo(() => {
+    return Object.keys(rowSelection)
+      .filter((index) => rowSelection[index])
+      .map((index) => snapshotFiles[Number(index)])
+      .filter(Boolean)
+      .map((file) => `${file.drive_letter}_${file.date_sort_key}_${file.size}`)
   }, [rowSelection, snapshotFiles]);
 
   const handle_file_delete = async () => {
     try {
-      await invoke('delete_snapshot_file', { selectedRowFileName })
+      for (const selectedRowFileName of selectedRowFileNames) {
+        await invoke('delete_snapshot_file', { selectedRowFileName })
+      }
 
       // refresh list
       const temp: SnapshotFile[] = await invoke('get_local_snapshot_files')
@@ -143,6 +139,7 @@ export function SettingsPage() {
                       data={snapshotFiles}
                       rowSelection={rowSelection}
                       setRowSelection={setRowSelection}
+                      maxSelectedRows={Number.MAX_SAFE_INTEGER}
                     />
                   </div>
                 </CardContent>
@@ -152,7 +149,7 @@ export function SettingsPage() {
                     <AlertDialogTrigger asChild>
                       <Button
                         size="sm"
-                        disabled={selectedRowFileName === ""}
+                        disabled={selectedRowFileNames.length === 0}
                         className="gap-2"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -163,7 +160,7 @@ export function SettingsPage() {
                       <AlertDialogHeader>
                         <AlertDialogTitle>{t("snapshot.deleteTitle")}</AlertDialogTitle>
                         <AlertDialogDescription>
-                          {t("snapshot.deleteDescription")}
+                          {t("snapshot.deleteDescription", { count: selectedRowFileNames.length })}
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>

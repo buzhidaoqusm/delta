@@ -52,7 +52,7 @@
     },
     "deleteSelected": "删除所选",
     "deleteTitle": "删除快照？",
-    "deleteDescription": "这会从磁盘中永久删除所选快照。",
+    "deleteDescription": "这会从磁盘中永久删除所选的 {{count}} 个快照。",
     "legacyBadge": "Old",
     "legacyPreviewUnsupported": "旧快照不支持预览。请创建新的快照后再使用预览功能。",
     "compareSnapshots": "对比快照",

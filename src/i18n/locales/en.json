@@ -51,8 +51,9 @@
       "size": "Size"
     },
     "deleteSelected": "Delete Selected",
-    "deleteTitle": "Delete Snapshot?",
-    "deleteDescription": "This will permanently delete the selected snapshot from your disk.",
+    "deleteTitle": "Delete Snapshots?",
+    "deleteDescription": "This will permanently delete {{count}} selected snapshot from your disk.",
+    "deleteDescription_other": "This will permanently delete {{count}} selected snapshots from your disk.",
     "legacyBadge": "Old",
     "legacyPreviewUnsupported": "Old snapshots cannot be previewed. Create a new snapshot to use preview.",
     "compareSnapshots": "Compare Snapshots",
