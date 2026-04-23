@@ -8,6 +8,8 @@
     "close": "Close",
     "copy": "Copy",
     "delete": "Delete",
+    "disabled": "Disabled",
+    "enabled": "Enabled",
     "loading": "Loading...",
     "notAvailable": "N/A",
     "reveal": "Reveal"
@@ -84,6 +86,10 @@
     "thresholdGb": "Save threshold (GB)",
     "lastRun": "Last run",
     "saving": "Saving...",
+    "diagnostics": "Diagnostics",
+    "autostartState": "Autostart state",
+    "currentExe": "Current executable",
+    "logPath": "Log file",
     "status": {
       "never_run": "Never run",
       "success_saved": "Snapshot saved",

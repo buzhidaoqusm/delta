@@ -5,6 +5,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use crate::error::AppError;
 
 mod auto_scan;
+mod auto_scan_log;
 mod config;
 mod database;
 mod disk; // compile my stuff
@@ -69,6 +70,16 @@ pub fn run() {
                 }
             }
 
+            if is_background_scan {
+                let _ = auto_scan_log::append(
+                    &local_app_data_path,
+                    format!(
+                        "app setup detected background scan mode: args={:?}",
+                        std::env::args().collect::<Vec<_>>()
+                    ),
+                );
+            }
+
             let state = BackendState {
                 file_tree: std::sync::Mutex::new(None),
                 local_appdata_path: Some(local_app_data_path.clone()), 
@@ -97,6 +108,9 @@ pub fn run() {
                     }
                     app_handle.exit(0);
                 });
+            } else if let Some(window) = app.get_webview_window("main") {
+                window.show()?;
+                window.set_focus()?;
             }
 
             Ok(())
@@ -116,6 +130,7 @@ pub fn run() {
             database::get_path_historical_data,
             config::get_auto_scan_config,
             config::update_auto_scan_config,
+            config::get_auto_scan_diagnostics,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

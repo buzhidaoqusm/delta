@@ -8,6 +8,8 @@
     "close": "关闭",
     "copy": "复制",
     "delete": "删除",
+    "disabled": "已关闭",
+    "enabled": "已开启",
     "loading": "加载中...",
     "notAvailable": "不可用",
     "reveal": "显示"
@@ -83,6 +85,10 @@
     "thresholdGb": "保存阈值（GB）",
     "lastRun": "上次运行",
     "saving": "保存中...",
+    "diagnostics": "诊断信息",
+    "autostartState": "自启状态",
+    "currentExe": "当前可执行文件",
+    "logPath": "日志文件",
     "status": {
       "never_run": "尚未运行",
       "success_saved": "已保存快照",

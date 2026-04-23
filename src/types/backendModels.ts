@@ -79,3 +79,9 @@ export interface AutoScanConfig {
 export interface AppConfig {
   auto_scan: AutoScanConfig;
 }
+
+export interface AutoScanDiagnostics {
+  log_path: string;
+  autostart_enabled: boolean;
+  current_exe: string;
+}

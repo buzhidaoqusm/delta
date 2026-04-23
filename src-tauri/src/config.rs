@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri_plugin_autostart::ManagerExt;
 
+use crate::auto_scan_log;
 use crate::error::AppError;
 
 const CONFIG_FILE_NAME: &str = "config.json";
@@ -13,6 +14,13 @@ const DEFAULT_THRESHOLD_BYTES: u64 = 1_073_741_824;
 pub struct AppConfig {
     #[serde(default)]
     pub auto_scan: AutoScanConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AutoScanDiagnostics {
+    pub log_path: String,
+    pub autostart_enabled: bool,
+    pub current_exe: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -163,13 +171,68 @@ pub fn update_auto_scan_config(
 
     let mut app_config = read_app_config(local_appdata_path)?;
     app_config.auto_scan = config;
+    let current_exe = std::env::current_exe()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|err| format!("failed to read current exe: {err}"));
+
+    let _ = auto_scan_log::append(
+        local_appdata_path,
+        format!(
+            "settings update requested: enabled={}, target_path=\"{}\", interval_days={}, save_threshold_bytes={}, current_exe=\"{}\"",
+            app_config.auto_scan.enabled,
+            app_config.auto_scan.target_path,
+            app_config.auto_scan.interval_days,
+            app_config.auto_scan.save_threshold_bytes,
+            current_exe
+        ),
+    );
 
     if app_config.auto_scan.enabled {
         app.autolaunch().enable()?;
+        let is_enabled = app.autolaunch().is_enabled()?;
+        let _ = auto_scan_log::append(
+            local_appdata_path,
+            format!("autostart enable succeeded: plugin_is_enabled={is_enabled}"),
+        );
     } else {
-        app.autolaunch().disable()?;
+        match app.autolaunch().disable() {
+            Ok(()) => {
+                let _ = auto_scan_log::append(local_appdata_path, "autostart disable succeeded");
+            }
+            Err(err) => {
+                let _ = auto_scan_log::append(
+                    local_appdata_path,
+                    format!("autostart disable returned error: {err}"),
+                );
+                if app.autolaunch().is_enabled().unwrap_or(false) {
+                    return Err(err.into());
+                }
+            }
+        }
     }
 
     write_app_config(local_appdata_path, &app_config)?;
     Ok(app_config)
+}
+
+#[tauri::command]
+pub fn get_auto_scan_diagnostics(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::model::BackendState>,
+) -> Result<AutoScanDiagnostics, AppError> {
+    let local_appdata_path = state
+        .local_appdata_path
+        .as_ref()
+        .ok_or_else(|| AppError::StartupError("Missing local app data path".to_string()))?;
+
+    let current_exe = std::env::current_exe()?.display().to_string();
+    let autostart_enabled = app.autolaunch().is_enabled()?;
+
+    Ok(AutoScanDiagnostics {
+        log_path: auto_scan_log::log_path(local_appdata_path)
+            .display()
+            .to_string(),
+        autostart_enabled,
+        current_exe,
+    })
 }

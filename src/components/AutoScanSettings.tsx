@@ -15,7 +15,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import type { AppConfig, AutoScanConfig, BackendError } from "@/types";
+import type {
+  AppConfig,
+  AutoScanConfig,
+  AutoScanDiagnostics,
+  BackendError,
+} from "@/types";
 import { useErrorStore } from "./store";
 
 const BYTES_PER_GB = 1024 * 1024 * 1024;
@@ -33,7 +38,19 @@ export function AutoScanSettings() {
   const [config, setConfig] = useState<AutoScanConfig | null>(null);
   const [intervalDraft, setIntervalDraft] = useState("7");
   const [thresholdDraft, setThresholdDraft] = useState("1");
+  const [diagnostics, setDiagnostics] = useState<AutoScanDiagnostics | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  const loadDiagnostics = async () => {
+    try {
+      const result = await invoke<AutoScanDiagnostics>(
+        "get_auto_scan_diagnostics"
+      );
+      setDiagnostics(result);
+    } catch (err) {
+      setCurrentBackendError(err as BackendError);
+    }
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -42,6 +59,7 @@ export function AutoScanSettings() {
         setConfig(result.auto_scan);
         setIntervalDraft(result.auto_scan.interval_days.toString());
         setThresholdDraft(formatThresholdGb(result.auto_scan.save_threshold_bytes));
+        await loadDiagnostics();
       } catch (err) {
         setCurrentBackendError(err as BackendError);
       }
@@ -62,6 +80,7 @@ export function AutoScanSettings() {
       setConfig(result.auto_scan);
       setIntervalDraft(result.auto_scan.interval_days.toString());
       setThresholdDraft(formatThresholdGb(result.auto_scan.save_threshold_bytes));
+      await loadDiagnostics();
     } catch (err) {
       if (previousConfig) {
         setConfig(previousConfig);
@@ -227,6 +246,26 @@ export function AutoScanSettings() {
             </div>
           )}
         </div>
+
+        {diagnostics && (
+          <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
+            <div className="font-medium text-foreground">
+              {t("autoScan.diagnostics")}
+            </div>
+            <div>
+              {t("autoScan.autostartState")}:{" "}
+              {diagnostics.autostart_enabled
+                ? t("common.enabled")
+                : t("common.disabled")}
+            </div>
+            <div className="break-all">
+              {t("autoScan.currentExe")}: {diagnostics.current_exe}
+            </div>
+            <div className="break-all">
+              {t("autoScan.logPath")}: {diagnostics.log_path}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
