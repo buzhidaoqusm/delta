@@ -2,12 +2,17 @@ import { ColumnDef } from "@tanstack/react-table"
 import { Checkbox } from "./ui/checkbox"
 import { formatBytes, formatDateTime } from "@/lib/utils"
 import { TFunction } from "i18next"
+import { Badge } from "./ui/badge"
 
 export type SnapshotFile = {
   drive_letter: string
   date_time: string,
   date_sort_key: number,
   size: number,
+  schema_version: number,
+  can_preview: boolean,
+  can_compare: boolean,
+  root_path?: string,
 }
 
 export const createSnapshotColumns = (
@@ -21,6 +26,11 @@ export const createSnapshotColumns = (
       return <div className="flex flex-row gap-2">
         <Checkbox checked={row.getIsSelected()} onCheckedChange={(value) => row.toggleSelected(!!value)}></Checkbox>
         <p>{row.original.drive_letter}</p>
+        {!row.original.can_preview && (
+          <Badge variant="outline" className="h-5 px-1 text-[10px]">
+            {t("snapshot.legacyBadge")}
+          </Badge>
+        )}
       </div>
     }
   },

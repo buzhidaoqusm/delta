@@ -22,7 +22,9 @@ export default function Overview() {
 
 
     const currentNode = userStore((state) => state.currentEntryData)
+    const analysisMode = userStore((state) => state.analysisMode)
     const currentLocale = i18n.resolvedLanguage ?? i18n.language
+    const isHistoricalMode = analysisMode === "snapshot-preview" || analysisMode === "snapshot-compare"
 
     const current_size = currentNode.size
     const current_size_str = filesize(Number(current_size), { base: 2, standard: "jedec" }) as string
@@ -177,10 +179,12 @@ export default function Overview() {
                         {currentNode.path}
                     </code>
 
-                    <Button className="absolute bottom-1 right-1 h-3 px-2 text-[10px] " variant="destructive" onClick={
-                        () => { test_reveal_opener(currentNode.path) }
-                    }>{t("common.reveal")}</Button>
-                    <Button className="absolute bottom-1 right-13 h-3 px-2 text-[10px] " variant="outline" onClick={
+                    {!isHistoricalMode && (
+                        <Button className="absolute bottom-1 right-1 h-3 px-2 text-[10px] " variant="destructive" onClick={
+                            () => { test_reveal_opener(currentNode.path) }
+                        }>{t("common.reveal")}</Button>
+                    )}
+                    <Button className={`absolute bottom-1 h-3 px-2 text-[10px] ${isHistoricalMode ? "right-1" : "right-13"}`} variant="outline" onClick={
                         () => { navigator.clipboard.writeText(currentNode.path) }
                     }>{t("common.copy")}</Button>
                 </div>

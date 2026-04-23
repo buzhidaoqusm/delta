@@ -52,7 +52,9 @@
     },
     "deleteSelected": "Delete Selected",
     "deleteTitle": "Delete Snapshot?",
-    "deleteDescription": "This will permanently delete the selected snapshot from your disk."
+    "deleteDescription": "This will permanently delete the selected snapshot from your disk.",
+    "legacyBadge": "Old",
+    "legacyPreviewUnsupported": "Old snapshots cannot be previewed. Create a new snapshot to use preview."
   },
   "settings": {
     "title": "Settings",

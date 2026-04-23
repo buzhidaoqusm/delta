@@ -40,10 +40,11 @@ interface DataTableProps<TData, TValue> {
   data: TData[]
   rowSelection: RowSelectionState
   setRowSelection: OnChangeFn<RowSelectionState>
+  onRowDoubleClick?: (row: TData) => void
 }
 
 // making the datatable generic with the input types
-export function DataTable<TData, TValue>({columns, data, rowSelection, setRowSelection}: DataTableProps<TData, TValue>) {
+export function DataTable<TData, TValue>({columns, data, rowSelection, setRowSelection, onRowDoubleClick}: DataTableProps<TData, TValue>) {
   const { t } = useTranslation()
   const table = useReactTable({
     data,
@@ -94,6 +95,7 @@ export function DataTable<TData, TValue>({columns, data, rowSelection, setRowSel
                     key={row.id}
                     data-state={row.getIsSelected() && "selected"}
                     className="data-[state=selected]:bg-green-950"
+                    onDoubleClick={() => onRowDoubleClick?.(row.original)}
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id}>

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { BackendError, CurrentEntryDetails, DirView, DirViewChildren, TreeDataNode } from "@/types";
+import { AnalysisMode, BackendError, CurrentEntryDetails, DirView, DirViewChildren, TreeDataNode } from "@/types";
 import { appendPaths } from "@/lib/utils";
 import { SnapshotFile } from "./data_table_columns";
 
@@ -15,6 +15,8 @@ export const clearHistoryCache = () => {
 // the root is the global state, everything else is helper functions
 interface FrontEndFileSystemStore {
   root: TreeDataNode;
+  analysisMode: AnalysisMode;
+  activeSnapshotFile: string;
   currentPath: string; // used for the temporary onhover path thing
   currentEntryDetail: CurrentEntryDetails; // used for the quick detail at top bar
   currentEntryData: TreeDataNode; // used for the side overview
@@ -25,6 +27,9 @@ interface FrontEndFileSystemStore {
   changeCurrentPath: (path: string) => void;
   changeCurrentEntryDetails: (numsubdir: number, numsubfile: number) => void;
   initDirData: (inital: DirView, rootPath: string) => void;
+  initSnapshotPreviewData: (initial: DirView, snapshotFile: string) => void;
+  setAnalysisMode: (mode: AnalysisMode) => void;
+  setActiveSnapshotFile: (snapshotFile: string) => void;
   setSnapshotFlag: (flag: boolean) => void;
   setSelectedHistorySnapshotFile: (file: string) => void;
 }
@@ -128,6 +133,52 @@ export const snapshotStore = create<FrontEndSnapshotStore>((set, get) => ({
   },
 }))
 
+const mapDirViewChildrenToTreeNodes = (
+  result: DirViewChildren,
+  currentNode: TreeDataNode
+): TreeDataNode[] => {
+  const subdirs = result.subdirviews.map((subdir) => ({
+    id: subdir.id,
+    name: subdir.name,
+    size: subdir.meta.size,
+    numsubdir: subdir.meta.num_subdir,
+    numsubfiles: subdir.meta.num_files,
+
+    diff: subdir.meta.diff ? {
+      new_flag: subdir.meta.diff.new_dir_flag,
+      deleted_flag: subdir.meta.diff.deleted_dir_flag,
+      prevnumsubdir: subdir.meta.diff.prev_num_subdir,
+      prevnumfiles: subdir.meta.diff.prev_num_files,
+      prevsize: subdir.meta.diff.previous_size,
+    } : undefined,
+
+    created: new Date(subdir.meta.created.secs_since_epoch * 1000),
+    modified: new Date(subdir.meta.modified.secs_since_epoch * 1000),
+    path: subdir.path ?? appendPaths(currentNode.path, subdir.name),
+    children: [],
+    directory: true,
+  }));
+
+  const files = result.files.map((file) => ({
+    id: file.id,
+    name: file.name,
+    size: file.meta.size,
+    path: file.path ?? appendPaths(currentNode.path, file.name),
+
+    diff: file.meta.diff ? {
+      new_flag: file.meta.diff.new_file_flag,
+      prevsize: file.meta.diff.previous_size,
+      deleted_flag: file.meta.diff.deleted_file_flag,
+    } : undefined,
+    directory: false,
+
+    created: new Date(file.meta.created.secs_since_epoch * 1000),
+    modified: new Date(file.meta.modified.secs_since_epoch * 1000),
+  }));
+
+  return [...subdirs, ...files];
+};
+
 export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
   root:
   {
@@ -138,6 +189,10 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
     size: 0,
     directory: true,
   },
+
+  analysisMode: "live-scan",
+
+  activeSnapshotFile: "",
 
   currentEntryData:
   {
@@ -165,57 +220,20 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
 
       const { snapshotFlag } = get();
       const { prevSnapshotFilePath } = get();
+      const { analysisMode } = get();
 
-      const result: DirViewChildren = await invoke<DirViewChildren>(
-        'query_new_dir_object',
-        { pathList, snapshotFlag, prevSnapshotFilePath }
-      );
+      const result: DirViewChildren = analysisMode === "snapshot-preview"
+        ? await invoke<DirViewChildren>(
+          'query_snapshot_dir_object',
+          { snapshotFileName: get().activeSnapshotFile, parentId: currentNode.id }
+        )
+        : await invoke<DirViewChildren>(
+          'query_new_dir_object',
+          { pathList, snapshotFlag, prevSnapshotFilePath }
+        );
 
       userStore.setState((state) => {
-
-        const subdirs = result.subdirviews.map((subdir) => ({ // It seems these are the actual nodes that the tree uses for each node!
-          id: subdir.id,
-          name: subdir.name,
-          size: subdir.meta.size,
-          numsubdir: subdir.meta.num_subdir,
-          numsubfiles: subdir.meta.num_files,
-
-          diff: subdir.meta.diff ? {
-            new_flag: subdir.meta.diff.new_dir_flag,
-            deleted_flag: subdir.meta.diff.deleted_dir_flag,
-            prevnumsubdir: subdir.meta.diff.prev_num_subdir,
-            prevnumfiles: subdir.meta.diff.prev_num_files,
-            prevsize: subdir.meta.diff.previous_size,
-          } : undefined,
-
-          created: new Date(subdir.meta.created.secs_since_epoch * 1000),
-
-          modified: new Date(subdir.meta.modified.secs_since_epoch * 1000),
-
-          path: appendPaths(currentNode.path, subdir.name),
-          children: [],
-          directory: true,
-        }));
-
-        const files = result.files.map((file) => ({
-          id: file.id,
-          name: file.name,
-          size: file.meta.size,
-          path: appendPaths(currentNode.path, file.name),
-
-          diff: file.meta.diff ? {
-            new_flag: file.meta.diff.new_file_flag,
-            prevsize: file.meta.diff.previous_size,
-            deleted_flag: file.meta.diff.deleted_file_flag,
-          } : undefined,
-          directory: false,
-
-          created: new Date(file.meta.created.secs_since_epoch * 1000),
-
-          modified: new Date(file.meta.modified.secs_since_epoch * 1000),
-        }));
-
-        const newChildren = [...subdirs, ...files];
+        const newChildren = mapDirViewChildrenToTreeNodes(result, currentNode);
 
         // Mutate the node reference directly
         currentNode.children = newChildren;
@@ -249,6 +267,12 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
   changeCurrentOverviewNode: (currentTreeNode) =>
     set({ currentEntryData: currentTreeNode }),
 
+  setAnalysisMode: (mode) =>
+    set({ analysisMode: mode }),
+
+  setActiveSnapshotFile: (snapshotFile) =>
+    set({ activeSnapshotFile: snapshotFile }),
+
   initDirData: (initial, rootPath) => {
     // takes in initial dir view which is unexpanded X:\        
     // change the root based on the passed in stuff
@@ -276,12 +300,45 @@ export const userStore = create<FrontEndFileSystemStore>((set, get) => ({
       };
 
       return { // init current states
+        analysisMode: "live-scan",
+        activeSnapshotFile: "",
         root: initRoot,
         currentEntryData: initRoot,
         currentPath: initial.name,
       };
     }
     )
+  },
+
+  initSnapshotPreviewData: (initial, snapshotFile) => {
+    userStore.setState((state) => {
+      const initRoot = {
+        id: initial.id,
+        name: initial.name,
+        size: initial.meta.size,
+        path: initial.path ?? initial.name,
+        numsubdir: initial.meta.num_subdir,
+        numsubfiles: initial.meta.num_files,
+        children: [],
+        diff: initial.meta.diff ? {
+          new_flag: initial.meta.diff.new_dir_flag,
+          deleted_flag: initial.meta.diff.deleted_dir_flag,
+          prevnumsubdir: initial.meta.diff.prev_num_subdir,
+          prevnumfiles: initial.meta.diff.prev_num_files,
+          prevsize: initial.meta.diff.previous_size,
+        } : undefined,
+        directory: true,
+        sourceSnapshotFile: snapshotFile,
+      };
+
+      return {
+        analysisMode: "snapshot-preview",
+        activeSnapshotFile: snapshotFile,
+        root: initRoot,
+        currentEntryData: initRoot,
+        currentPath: initRoot.path,
+      };
+    });
   },
 
   setSelectedHistorySnapshotFile: (fileName) => {

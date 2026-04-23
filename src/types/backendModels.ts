@@ -32,6 +32,7 @@ interface File {
   meta: FileViewMeta;
   name: string;
   id: string;
+  path?: string;
 }
 
 export interface FileViewMeta {
@@ -47,6 +48,7 @@ export interface DirView {
   meta: DirViewMeta;
   name: string;
   id: string;
+  path?: string;
 }
 
 export interface DirViewChildren {

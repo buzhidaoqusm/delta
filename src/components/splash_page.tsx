@@ -52,6 +52,31 @@ const SplashPage: React.FC<SplashPageProps> = ({ setWhichField }) => {
 
   const setCurrentBackendError = useErrorStore((state) => state.setCurrentBackendError)
 
+  const snapshotFileName = (snapshot: SnapshotFile) =>
+    `${snapshot.drive_letter}_${snapshot.date_sort_key}_${snapshot.size}`
+
+  const openSnapshotPreview = async (snapshot: SnapshotFile) => {
+    if (!snapshot.can_preview) {
+      setCurrentBackendError({
+        err_code: 1001,
+        user_error_string_desc: t("snapshot.legacyPreviewUnsupported"),
+        library_generated_error_desc: "N/A",
+      })
+      return
+    }
+
+    try {
+      const result = await invoke<DirView>('open_snapshot_preview', {
+        snapshotFileName: snapshotFileName(snapshot),
+      })
+
+      userStore.getState().initSnapshotPreviewData(result, snapshotFileName(snapshot))
+      setWhichField(false)
+    } catch (err) {
+      setCurrentBackendError(err)
+    }
+  }
+
 
   useEffect(() => {
 
@@ -78,7 +103,7 @@ const SplashPage: React.FC<SplashPageProps> = ({ setWhichField }) => {
       return;
     }
 
-    setSnapshotFile(`${selectedData.drive_letter}_${selectedData.date_sort_key}_${selectedData.size}`) // sync to zustand
+    setSnapshotFile(snapshotFileName(selectedData)) // sync to zustand
   }, [rowSelection, snapshotFiles, setSnapshotFile]);
 
 
@@ -93,7 +118,13 @@ const SplashPage: React.FC<SplashPageProps> = ({ setWhichField }) => {
 
         {/* Test data table for snapshots, datatable should be generic */}
         <Card className='p-3 min-w-[350px]'>
-          <DataTable columns={columns} data={snapshotFiles} rowSelection={rowSelection} setRowSelection={setRowSelection} ></DataTable>
+          <DataTable
+            columns={columns}
+            data={snapshotFiles}
+            rowSelection={rowSelection}
+            setRowSelection={setRowSelection}
+            onRowDoubleClick={openSnapshotPreview}
+          ></DataTable>
         </Card>
 
         {/* disk scan tabs */}

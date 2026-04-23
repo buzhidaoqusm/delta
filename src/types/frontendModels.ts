@@ -1,3 +1,5 @@
+export type AnalysisMode = "live-scan" | "snapshot-preview" | "snapshot-compare";
+
 export interface TreeDataNode {
     id: string;
     name: string;
@@ -7,6 +9,7 @@ export interface TreeDataNode {
     openIcon?: any;
     children?: TreeDataNode[];
     path?: string;
+    sourceSnapshotFile?: string;
     size?: number;
     numsubdir?: number;
     numsubfiles?: number;

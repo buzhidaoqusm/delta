@@ -1,14 +1,17 @@
 use chrono::Local;
 use chrono::NaiveDateTime;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::disk::hash_path_id;
 use crate::error::AppError;
 use crate::model::{self, BackendState, Node, SnapshotDbMeta};
 use crate::platform::clean_disk_name;
+
+const SNAPSHOT_SCHEMA_VERSION_V2: u8 = 2;
 
 pub struct SnapshotRecord {
     pub id: i64,
@@ -16,6 +19,174 @@ pub struct SnapshotRecord {
     pub dir_flag: bool,
     pub sub_folder_count: i64,
     pub sub_file_count: i64,
+}
+
+struct SnapshotCapability {
+    schema_version: u8,
+    can_preview: bool,
+    can_compare: bool,
+    root_path: Option<String>,
+}
+
+#[derive(Clone)]
+struct SnapshotEntryRow {
+    id: i64,
+    name: String,
+    path: String,
+    size: i64,
+    dir_flag: bool,
+    sub_folder_count: i64,
+    sub_file_count: i64,
+    created: i64,
+    modified: i64,
+}
+
+fn system_time_to_secs(time: SystemTime) -> i64 {
+    time.duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn secs_to_system_time(secs: i64) -> SystemTime {
+    if secs <= 0 {
+        UNIX_EPOCH
+    } else {
+        UNIX_EPOCH + Duration::from_secs(secs as u64)
+    }
+}
+
+fn snapshot_db_path(
+    state: &tauri::State<'_, BackendState>,
+    snapshot_file_name: &str,
+) -> PathBuf {
+    state
+        .local_appdata_path
+        .as_ref()
+        .unwrap()
+        .join("tempsnapshot")
+        .join(format!("{}.db", snapshot_file_name))
+}
+
+fn table_exists(conn: &Connection, table_name: &str) -> Result<bool, AppError> {
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [table_name],
+        |row| row.get(0),
+    )?;
+    Ok(exists > 0)
+}
+
+fn legacy_snapshot_capability() -> SnapshotCapability {
+    SnapshotCapability {
+        schema_version: 1,
+        can_preview: false,
+        can_compare: false,
+        root_path: None,
+    }
+}
+
+fn read_snapshot_capability(db_path: &Path) -> Result<SnapshotCapability, AppError> {
+    let conn = Connection::open(db_path)?;
+
+    if !table_exists(&conn, "snapshot_meta")? || !table_exists(&conn, "snapshot_entries")? {
+        return Ok(legacy_snapshot_capability());
+    }
+
+    let capability = conn
+        .query_row(
+            "SELECT schema_version, root_path FROM snapshot_meta LIMIT 1",
+            [],
+            |row| {
+                let schema_version: i64 = row.get(0)?;
+                let root_path: String = row.get(1)?;
+                Ok(SnapshotCapability {
+                    schema_version: schema_version as u8,
+                    can_preview: schema_version as u8 >= SNAPSHOT_SCHEMA_VERSION_V2,
+                    can_compare: schema_version as u8 >= SNAPSHOT_SCHEMA_VERSION_V2,
+                    root_path: Some(root_path),
+                })
+            },
+        )
+        .optional()?;
+
+    Ok(capability.unwrap_or_else(legacy_snapshot_capability))
+}
+
+fn query_snapshot_entry_by_parent_null(conn: &Connection) -> Result<SnapshotEntryRow, AppError> {
+    let entry = conn.query_row(
+        "SELECT id, name, path, size, dir_flag, sub_folder_count, sub_file_count, created, modified
+         FROM snapshot_entries
+         WHERE parent_id IS NULL
+         LIMIT 1",
+        [],
+        row_to_snapshot_entry,
+    )?;
+
+    Ok(entry)
+}
+
+fn query_snapshot_children(
+    conn: &Connection,
+    parent_id: i64,
+) -> Result<Vec<SnapshotEntryRow>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, path, size, dir_flag, sub_folder_count, sub_file_count, created, modified
+         FROM snapshot_entries
+         WHERE parent_id = ?1",
+    )?;
+
+    let rows = stmt.query_map([parent_id], row_to_snapshot_entry)?;
+    let mut entries = Vec::new();
+
+    for row in rows {
+        entries.push(row?);
+    }
+
+    Ok(entries)
+}
+
+fn row_to_snapshot_entry(row: &rusqlite::Row<'_>) -> Result<SnapshotEntryRow, rusqlite::Error> {
+    Ok(SnapshotEntryRow {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        path: row.get(2)?,
+        size: row.get(3)?,
+        dir_flag: row.get(4)?,
+        sub_folder_count: row.get(5)?,
+        sub_file_count: row.get(6)?,
+        created: row.get(7)?,
+        modified: row.get(8)?,
+    })
+}
+
+fn entry_to_dir_view(entry: SnapshotEntryRow) -> model::DirView {
+    model::DirView {
+        meta: model::DirViewMeta {
+            size: entry.size as u64,
+            num_files: entry.sub_file_count as u64,
+            num_subdir: entry.sub_folder_count as u64,
+            diff: None,
+            created: secs_to_system_time(entry.created),
+            modified: secs_to_system_time(entry.modified),
+        },
+        name: entry.name,
+        id: entry.id.to_string(),
+        path: Some(entry.path),
+    }
+}
+
+fn entry_to_file_view(entry: SnapshotEntryRow) -> model::FileView {
+    model::FileView {
+        meta: model::FileViewMeta {
+            size: entry.size as u64,
+            diff: None,
+            created: secs_to_system_time(entry.created),
+            modified: secs_to_system_time(entry.modified),
+        },
+        name: entry.name,
+        id: entry.id.to_string(),
+        path: Some(entry.path),
+    }
 }
 
 // This for query stats for a specific ID
@@ -181,23 +352,83 @@ pub async fn write_current_tree(
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS snapshot_meta (
+            schema_version INTEGER NOT NULL,
+            root_path TEXT NOT NULL,
+            root_name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            total_size INTEGER NOT NULL
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS snapshot_entries (
+            id INTEGER PRIMARY KEY,
+            parent_id INTEGER,
+            name TEXT NOT NULL,
+            path TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            dir_flag INTEGER NOT NULL,
+            sub_folder_count INTEGER DEFAULT 0,
+            sub_file_count INTEGER DEFAULT 0,
+            created INTEGER,
+            modified INTEGER
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_snapshot_entries_parent_id
+         ON snapshot_entries(parent_id)",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_snapshot_entries_path
+         ON snapshot_entries(path)",
+        [],
+    )?;
+
     let temp_transaction = conn.transaction()?;
 
+    temp_transaction.execute(
+        "INSERT INTO snapshot_meta (schema_version, root_path, root_name, created_at, total_size)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            SNAPSHOT_SCHEMA_VERSION_V2,
+            selected_disk,
+            root_ref.name,
+            local_time.to_rfc3339(),
+            root_size_bytes as i64
+        ],
+    )?;
+
     {
-        let mut stmt = temp_transaction.prepare(
+        let mut legacy_stmt = temp_transaction.prepare(
             "INSERT INTO snapshot (id, size, dir_flag, sub_folder_count, sub_file_count, parent_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?;
 
-        let mut stack = Vec::new();
-        stack.push((Node::Dir(root_ref), 0));
+        let mut entry_stmt = temp_transaction.prepare(
+            "INSERT INTO snapshot_entries
+             (id, parent_id, name, path, size, dir_flag, sub_folder_count, sub_file_count, created, modified)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        )?;
 
-        while let Some((node, real_parent_id)) = stack.pop() {
+        let mut stack = Vec::new();
+        stack.push((Node::Dir(root_ref), None::<i64>, selected_disk.clone()));
+
+        while let Some((node, real_parent_id, current_path)) = stack.pop() {
             let id: i64;
             let size: i64;
             let dir_flag: bool;
             let sub_folder_count: i64;
             let sub_file_count: i64;
+            let name: String;
+            let created: i64;
+            let modified: i64;
 
             match node {
                 Node::File(temp_file) => {
@@ -206,6 +437,9 @@ pub async fn write_current_tree(
                     dir_flag = false;
                     sub_folder_count = 0;
                     sub_file_count = 0;
+                    name = temp_file.name.clone();
+                    created = system_time_to_secs(temp_file.meta.created);
+                    modified = system_time_to_secs(temp_file.meta.modified);
                 }
                 Node::Dir(temp_dir) => {
                     id = temp_dir.id as i64;
@@ -213,23 +447,47 @@ pub async fn write_current_tree(
                     dir_flag = true;
                     sub_folder_count = temp_dir.meta.num_subdir as i64;
                     sub_file_count = temp_dir.meta.num_files as i64;
+                    name = temp_dir.name.clone();
+                    created = system_time_to_secs(temp_dir.meta.created);
+                    modified = system_time_to_secs(temp_dir.meta.modified);
 
                     for file in temp_dir.files.values() {
-                        stack.push((Node::File(file), id));
+                        let child_path = Path::new(&current_path)
+                            .join(&file.name)
+                            .to_string_lossy()
+                            .to_string();
+                        stack.push((Node::File(file), Some(id), child_path));
                     }
                     for subdir in temp_dir.subdirs.values() {
-                        stack.push((Node::Dir(subdir), id));
+                        let child_path = Path::new(&current_path)
+                            .join(&subdir.name)
+                            .to_string_lossy()
+                            .to_string();
+                        stack.push((Node::Dir(subdir), Some(id), child_path));
                     }
                 }
             }
 
-            stmt.execute(params![
+            legacy_stmt.execute(params![
                 id,
                 size,
                 dir_flag,
                 sub_folder_count,
                 sub_file_count,
-                real_parent_id
+                real_parent_id.unwrap_or(0)
+            ])?;
+
+            entry_stmt.execute(params![
+                id,
+                real_parent_id,
+                name,
+                current_path,
+                size,
+                dir_flag,
+                sub_folder_count,
+                sub_file_count,
+                created,
+                modified
             ])?;
         }
     }
@@ -264,7 +522,16 @@ pub fn get_local_snapshot_files(
                 .to_string_lossy()
                 .to_string(); // file stem removes the file extension
 
-            vec_file_names.push(parse_snapshot_file_name(&file_path_name)?);
+            let mut snapshot_meta = parse_snapshot_file_name(&file_path_name)?;
+            let capability =
+                read_snapshot_capability(&path).unwrap_or_else(|_| legacy_snapshot_capability());
+
+            snapshot_meta.schema_version = capability.schema_version;
+            snapshot_meta.can_preview = capability.can_preview;
+            snapshot_meta.can_compare = capability.can_compare;
+            snapshot_meta.root_path = capability.root_path;
+
+            vec_file_names.push(snapshot_meta);
         }
     }
 
@@ -288,6 +555,10 @@ fn parse_snapshot_file_name(path: &String) -> Result<SnapshotDbMeta, AppError> {
             date_time: NaiveDateTime::parse_from_str(date, "%Y%m%d%H%M")?.to_string(),
             date_sort_key: date.parse::<u64>()?,
             size: size.parse::<u64>()?,
+            schema_version: 1,
+            can_preview: false,
+            can_compare: false,
+            root_path: None,
         };
 
         return Ok(snapshot_meta);
@@ -315,6 +586,69 @@ pub fn delete_snapshot_file(
     // Using fs delete also catch the error for that if needed on the passed in path (such as if X does not exist)
 
     Ok(true)
+}
+
+#[tauri::command]
+pub fn open_snapshot_preview(
+    snapshot_file_name: String,
+    state: tauri::State<'_, BackendState>,
+) -> Result<model::DirView, AppError> {
+    let db_path = snapshot_db_path(&state, &snapshot_file_name);
+    let capability = read_snapshot_capability(&db_path)?;
+
+    if !capability.can_preview {
+        return Err(AppError::GeneralLogicalErr(
+            "Old snapshots cannot be previewed. Create a new snapshot to use preview.".to_string(),
+        ));
+    }
+
+    let conn = Connection::open(db_path)?;
+    let root_entry = query_snapshot_entry_by_parent_null(&conn)?;
+
+    if !root_entry.dir_flag {
+        return Err(AppError::GeneralLogicalErr(
+            "Snapshot root entry is not a directory".to_string(),
+        ));
+    }
+
+    Ok(entry_to_dir_view(root_entry))
+}
+
+#[tauri::command]
+pub fn query_snapshot_dir_object(
+    snapshot_file_name: String,
+    parent_id: String,
+    state: tauri::State<'_, BackendState>,
+) -> Result<model::DirViewChildren, AppError> {
+    let db_path = snapshot_db_path(&state, &snapshot_file_name);
+    let capability = read_snapshot_capability(&db_path)?;
+
+    if !capability.can_preview {
+        return Err(AppError::GeneralLogicalErr(
+            "Old snapshots cannot be previewed. Create a new snapshot to use preview.".to_string(),
+        ));
+    }
+
+    let parent_id = parent_id.parse::<i64>()?;
+    let conn = Connection::open(db_path)?;
+    let mut dir_views = Vec::new();
+    let mut file_views = Vec::new();
+
+    for entry in query_snapshot_children(&conn, parent_id)? {
+        if entry.dir_flag {
+            dir_views.push(entry_to_dir_view(entry));
+        } else {
+            file_views.push(entry_to_file_view(entry));
+        }
+    }
+
+    dir_views.sort_by_key(|entry| std::cmp::Reverse(entry.meta.size));
+    file_views.sort_by_key(|entry| std::cmp::Reverse(entry.meta.size));
+
+    Ok(model::DirViewChildren {
+        subdirviews: dir_views,
+        files: file_views,
+    })
 }
 
 // pub fn get_path_historical_data(

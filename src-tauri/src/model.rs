@@ -26,6 +26,10 @@ pub struct SnapshotDbMeta {
     pub date_time: String,
     pub date_sort_key: u64,
     pub size: u64,
+    pub schema_version: u8,
+    pub can_preview: bool,
+    pub can_compare: bool,
+    pub root_path: Option<String>,
 }
 
 pub enum Node<'a> {
@@ -44,23 +48,27 @@ pub struct Dir {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DirView {
-    meta: DirViewMeta,
-    name: String,
-    id: String, // Dir has id as u64 but this cannot be handled by javascript so impl needs to convert there is two wasy you can do it here or you can maybe make serde do it before but since the file does not have a view version we dont do it in the future this will be a conforminty change
+    pub meta: DirViewMeta,
+    pub name: String,
+    pub id: String, // Dir has id as u64 but this cannot be handled by javascript so impl needs to convert there is two wasy you can do it here or you can maybe make serde do it before but since the file does not have a view version we dont do it in the future this will be a conforminty change
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileView {
-    meta: FileViewMeta, // this needs to be changed
-    name: String,
-    id: String,
+    pub meta: FileViewMeta, // this needs to be changed
+    pub name: String,
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 // The subdir and files of a dir
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DirViewChildren {
-    subdirviews: Vec<DirView>,
-    files: Vec<FileView>,
+    pub subdirviews: Vec<DirView>,
+    pub files: Vec<FileView>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -146,6 +154,7 @@ impl Dir {
             },
             name: self.name.clone(),
             id: self.id.to_string(),
+            path: None,
         }
     }
 
@@ -178,6 +187,7 @@ impl Dir {
             },
             name: self.name.clone(),
             id: self.id.to_string(),
+            path: None,
         })
     }
 
@@ -188,6 +198,7 @@ impl Dir {
             .map(|file| FileView {
                 name: file.name.clone(),
                 id: file.id.to_string(),
+                path: None,
 
                 meta: FileViewMeta {
                     size: file.meta.size,
@@ -250,6 +261,7 @@ impl Dir {
                 },
                 name: file.name.clone(),
                 id: file.id.to_string(),
+                path: None,
             };
 
             file_view_vec.push(temp_file_view);
@@ -276,6 +288,7 @@ impl Dir {
             let temp_dir_view = DirView {
                 name: subdir.name.clone(),
                 id: subdir.id.to_string(),
+                path: None,
                 meta: DirViewMeta {
                     size: subdir.meta.size,
                     num_files: subdir.meta.num_files,
@@ -304,6 +317,7 @@ impl Dir {
                     let temp_deleted_dir_view = DirView {
                         name: "[deleted folder]".to_string(), // ATP the db does not store name for space saving
                         id: dir_entry.1.id.to_string(),
+                        path: None,
                         meta: DirViewMeta {
                             size: dir_entry.1.size as u64, // storing size in the meta, diff will have deleted flag for FE processing
                             num_files: dir_entry.1.sub_file_count as u64,
@@ -326,6 +340,7 @@ impl Dir {
                     let temp_deleted_file_view = FileView {
                         name: "[deleted file]".to_string(),
                         id: dir_entry.1.id.to_string(),
+                        path: None,
                         meta: FileViewMeta {
                             size: dir_entry.1.size as u64,
                             created: SystemTime::UNIX_EPOCH,
