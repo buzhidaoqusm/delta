@@ -8,8 +8,18 @@ import InfoFlagBar from "./info_flag_bar";
 import { formatBytes, parsePathToSegment, pathSeparator } from "../lib/utils"
 import { Progress } from "./ui/progress";
 import { useTranslation } from "react-i18next";
+import { useMemo, useState } from "react";
+import { TreeDataNode } from "@/types";
 
 const INDENT_SIZE = 20;
+
+type SortKey = "size" | "change";
+type SortDirection = "asc" | "desc";
+
+type TreeSort = {
+  key: SortKey;
+  direction: SortDirection;
+};
 
 // Header and node column widths
 const COL_WIDTHS = {
@@ -19,17 +29,65 @@ const COL_WIDTHS = {
   diff: "w-26",
 };
 
+const getNodeSize = (node: TreeDataNode) => {
+  if (node.diff?.deleted_flag) return 0;
+  return node.size ?? 0;
+};
+
+const getNodeChangeMagnitude = (node: TreeDataNode) => {
+  if (!node.diff) return 0;
+  const currentSize = node.size ?? 0;
+  const previousSize = node.diff.prevsize ?? 0;
+  const diff = node.diff.deleted_flag
+    ? previousSize - currentSize
+    : currentSize - previousSize;
+  return Math.abs(diff);
+};
+
+const sortTreeNodes = (nodes: TreeDataNode[], sort: TreeSort): TreeDataNode[] => {
+  return nodes
+    .map((node) => ({
+      ...node,
+      children: node.children ? sortTreeNodes(node.children, sort) : node.children,
+    }))
+    .sort((left, right) => {
+      const leftValue = sort.key === "size" ? getNodeSize(left) : getNodeChangeMagnitude(left);
+      const rightValue = sort.key === "size" ? getNodeSize(right) : getNodeChangeMagnitude(right);
+      const result = leftValue - rightValue;
+      return sort.direction === "asc" ? result : -result;
+    });
+};
+
 // Header
-const TreeHeader = () => {
+const TreeHeader = ({ sort, onSortChange }: {
+  sort: TreeSort;
+  onSortChange: (key: SortKey) => void;
+}) => {
   const { t } = useTranslation();
+  const sortMarker = (key: SortKey) => {
+    if (sort.key !== key) return "";
+    return sort.direction === "asc" ? " ↑" : " ↓";
+  };
 
   return (
     <div className="flex items-center h-8 text-xs font-mono font-bold text-gray-400 select-none min-w-[600px]">
       <div className="flex-1 pl-1">{t("tree.headers.name")}</div>
 
-      <div className={`${COL_WIDTHS.size} text-right px-2 border-l border-gray-300`}>{t("tree.headers.size")}</div>
+      <button
+        type="button"
+        className={`${COL_WIDTHS.size} text-right px-2 border-l border-gray-300 hover:text-white`}
+        onClick={() => onSortChange("size")}
+      >
+        {t("tree.headers.size")}{sortMarker("size")}
+      </button>
       <div className={`${COL_WIDTHS.prev} text-right px-2 border-l border-gray-300`}>{t("tree.headers.previous")}</div>
-      <div className={`${COL_WIDTHS.change} text-right px-2 border-l border-gray-300`}>{t("tree.headers.change")}</div>
+      <button
+        type="button"
+        className={`${COL_WIDTHS.change} text-right px-2 border-l border-gray-300 hover:text-white`}
+        onClick={() => onSortChange("change")}
+      >
+        {t("tree.headers.change")}{sortMarker("change")}
+      </button>
       <div className={`${COL_WIDTHS.diff} text-right px-2 border-l border-gray-300`}>{t("tree.headers.flag")}</div>
     </div>
   );
@@ -175,7 +233,19 @@ const SimpleNode = ({ node, style, dragHandle }: any) => {
 function TestFileTreeSecond() {
   const { t } = useTranslation();
   const rootState = userStore((state) => state.root);
+  const [sort, setSort] = useState<TreeSort>({ key: "size", direction: "desc" });
   const { ref, width, height } = useResizeObserver();
+  const sortedData = useMemo(
+    () => rootState ? sortTreeNodes([rootState], sort) : [],
+    [rootState, sort]
+  );
+
+  const handleSortChange = (key: SortKey) => {
+    setSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === "desc" ? "asc" : "desc",
+    }));
+  };
 
   if (!rootState) return <div>{t("common.loading")}</div>;
 
@@ -184,9 +254,9 @@ function TestFileTreeSecond() {
       <div className="h-full w-full overflow-auto">
         <div className="min-w-[600px] h-full flex flex-col">
 
-          <TreeHeader />
+          <TreeHeader sort={sort} onSortChange={handleSortChange} />
           <Tree
-            data={[rootState]}
+            data={sortedData}
             children={SimpleNode}
             width={width && width > 600 ? width : 600}
             height={height ? height - 32 : 300}
