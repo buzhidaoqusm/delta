@@ -1,6 +1,5 @@
 use humansize::{format_size, DECIMAL};
 use std::collections::HashMap;
-use std::fs::{self};
 use std::path::PathBuf;
 use std::time::SystemTime;
 use sysinfo::Disks;
@@ -44,6 +43,13 @@ pub struct LiveScanFileBatchUpdate {
 pub struct LiveScanFileBatchEvent {
     pub updates: Vec<LiveScanFileBatchUpdate>,
     pub entry_count: u64,
+}
+
+#[derive(Default)]
+struct PendingDirChildren {
+    files: HashMap<String, model::File>,
+    subdirs: HashMap<String, model::Dir>,
+    size: u64,
 }
 
 pub fn hash_path_id(path: &str) -> u64 {
@@ -195,8 +201,8 @@ pub fn naive_scan_with_events(
     app: AppHandle,
     event_mode: ScanEventMode,
 ) -> Result<model::Dir, AppError> {
-    let mut hash_store_dir: HashMap<PathBuf, model::Dir> = HashMap::new();
-    let mut hash_store_file: HashMap<PathBuf, model::File> = HashMap::new();
+    let mut pending_children: HashMap<PathBuf, PendingDirChildren> = HashMap::new();
+    let mut root_dir: Option<model::Dir> = None;
     let mut pending_file_updates: HashMap<String, (u64, u64)> = HashMap::new();
     let mut pending_file_count: u64 = 0;
 
@@ -237,8 +243,10 @@ pub fn naive_scan_with_events(
                     };
 
                     if event_mode == ScanEventMode::Live {
-                        if let Some(parent_path) = entry_parent_path {
-                            let update = pending_file_updates.entry(parent_path).or_insert((0, 0));
+                        if let Some(parent_path) = entry_parent_path.as_ref() {
+                            let update = pending_file_updates
+                                .entry(parent_path.clone())
+                                .or_insert((0, 0));
                             update.0 += new_file_node.meta.size;
                             update.1 += 1;
                             pending_file_count += 1;
@@ -252,100 +260,81 @@ pub fn naive_scan_with_events(
                         }
                     }
 
-                    hash_store_file.insert(entry_path, new_file_node);
+                    if let Some(parent_path) = entry_path.parent() {
+                        let pending_parent = pending_children
+                            .entry(parent_path.to_path_buf())
+                            .or_default();
+                        pending_parent.size += new_file_node.meta.size;
+                        pending_parent
+                            .files
+                            .insert(new_file_node.name.clone(), new_file_node);
+                    }
                 }
             } else if entry.file_type().is_dir() {
                 if let Ok(directory_meta) = entry.metadata() {
                     let entry_path = entry.path().to_path_buf();
                     let entry_path_string = path_to_string(&entry_path);
                     let entry_parent_path = entry_path.parent().map(path_to_string);
-                    let mut current_dir_size: u64 = 0;
+                    let completed_children =
+                        pending_children.remove(&entry_path).unwrap_or_default();
 
-                    if let Ok(temp_fs_read_dir) = fs::read_dir(entry_path.clone()) {
-                        let mut new_dir_node = model::Dir {
-                            name: entry.file_name().to_string_lossy().to_string(),
-                            files: HashMap::new(),
-                            subdirs: HashMap::new(),
-                            meta: model::DirMeta {
-                                size: 0, // file.metadata does not give full size so to calc manually set to 0 on creation
-                                created: directory_meta.created().unwrap_or(SystemTime::UNIX_EPOCH),
-                                modified: directory_meta
-                                    .accessed()
-                                    .unwrap_or(SystemTime::UNIX_EPOCH),
-                                num_files: 0, // I believe you can get these from the previous entry variable
-                                num_subdir: 0,
-                            },
-                            id: {
-                                if let Some(temp) = entry.path().to_str() {
-                                    hash_path_id(temp)
-                                } else {
-                                    hash_path_id("thereisnothingthisisjusttestchangelater")
-                                }
-                            },
-                        };
-
-                        for temp_entry_result in temp_fs_read_dir {
-                            if let Ok(temp_entry) = temp_entry_result {
-                                if let Ok(temp_entry_type) = temp_entry.file_type() {
-                                    if temp_entry_type.is_dir() {
-                                        if let Some(hashed_dir) =
-                                            hash_store_dir.remove(&temp_entry.path())
-                                        {
-                                            current_dir_size += hashed_dir.meta.size; // need to increment first as push makes the struct take ownership
-                                                                                      // new_dir_node.subdirs.(hashed_dir);
-                                            new_dir_node
-                                                .subdirs
-                                                .insert(hashed_dir.name.clone(), hashed_dir);
-                                        }
-                                    } else if temp_entry_type.is_file() {
-                                        if let Some(hashed_file) =
-                                            hash_store_file.remove(&temp_entry.path())
-                                        {
-                                            current_dir_size += hashed_file.meta.size;
-                                            // new_dir_node.files.push(hashed_file);
-                                            new_dir_node
-                                                .files
-                                                .insert(hashed_file.name.clone(), hashed_file);
-                                        }
-                                    }
-                                    // originally ther was na else statement here
-                                }
+                    // Files and subdirs are direct-child counts. Size is recursive because
+                    // completed child directories already carry their accumulated size.
+                    let new_dir_node = model::Dir {
+                        name: entry.file_name().to_string_lossy().to_string(),
+                        meta: model::DirMeta {
+                            size: completed_children.size,
+                            created: directory_meta.created().unwrap_or(SystemTime::UNIX_EPOCH),
+                            modified: directory_meta.accessed().unwrap_or(SystemTime::UNIX_EPOCH),
+                            num_files: completed_children.files.len() as u64,
+                            num_subdir: completed_children.subdirs.len() as u64,
+                        },
+                        id: {
+                            if let Some(temp) = entry.path().to_str() {
+                                hash_path_id(temp)
+                            } else {
+                                hash_path_id("thereisnothingthisisjusttestchangelater")
                             }
-                        }
+                        },
+                        files: completed_children.files,
+                        subdirs: completed_children.subdirs,
+                    };
 
-                        // Note
-                        // files and subdirs are not recursively counted here. It is local to that specific directory.
-                        // Size However is accumulated recursively
-                        new_dir_node.meta.num_files = new_dir_node.files.len() as u64; // usize to u64
-                        new_dir_node.meta.num_subdir = new_dir_node.subdirs.len() as u64;
-                        new_dir_node.meta.size = current_dir_size; // accumulated length should be here
+                    if event_mode == ScanEventMode::Live {
+                        flush_live_file_batch(
+                            &app,
+                            &mut pending_file_updates,
+                            &mut pending_file_count,
+                            true,
+                        )?;
 
-                        if event_mode == ScanEventMode::Live {
-                            flush_live_file_batch(
-                                &app,
-                                &mut pending_file_updates,
-                                &mut pending_file_count,
-                                true,
-                            )?;
+                        emit_live_scan_entry(
+                            &app,
+                            LiveScanEntryEvent {
+                                entry_type: "directory".to_string(),
+                                path: entry_path_string,
+                                parent_path: entry_parent_path,
+                                name: new_dir_node.name.clone(),
+                                id: new_dir_node.id.to_string(),
+                                size: new_dir_node.meta.size,
+                                num_files: new_dir_node.meta.num_files,
+                                num_subdir: new_dir_node.meta.num_subdir,
+                                created: new_dir_node.meta.created,
+                                modified: new_dir_node.meta.modified,
+                            },
+                        )?;
+                    }
 
-                            emit_live_scan_entry(
-                                &app,
-                                LiveScanEntryEvent {
-                                    entry_type: "directory".to_string(),
-                                    path: entry_path_string,
-                                    parent_path: entry_parent_path,
-                                    name: new_dir_node.name.clone(),
-                                    id: new_dir_node.id.to_string(),
-                                    size: new_dir_node.meta.size,
-                                    num_files: new_dir_node.meta.num_files,
-                                    num_subdir: new_dir_node.meta.num_subdir,
-                                    created: new_dir_node.meta.created,
-                                    modified: new_dir_node.meta.modified,
-                                },
-                            )?;
-                        }
-
-                        hash_store_dir.insert(entry_path, new_dir_node);
+                    if entry.depth() == 0 {
+                        root_dir = Some(new_dir_node);
+                    } else if let Some(parent_path) = entry_path.parent() {
+                        let pending_parent = pending_children
+                            .entry(parent_path.to_path_buf())
+                            .or_default();
+                        pending_parent.size += new_dir_node.meta.size;
+                        pending_parent
+                            .subdirs
+                            .insert(new_dir_node.name.clone(), new_dir_node);
                     }
                 }
             }
@@ -362,16 +351,9 @@ pub fn naive_scan_with_events(
         )?;
     }
 
-    // If the structure of the disk scanned then it has only 1 root
-    if hash_store_dir.len() == 1 {
-        // iter is view only
-        // into_iter consumes/takes ownership of it
-        let (_root_name, root) = hash_store_dir.into_iter().next().unwrap();
-
-        return Ok(root);
-    } else {
-        Err(AppError::GeneralLogicalErr(
+    root_dir.ok_or_else(|| {
+        AppError::GeneralLogicalErr(
             "During scan a single root directory for the disk does not exist".to_string(),
-        ))
-    }
+        )
+    })
 }
